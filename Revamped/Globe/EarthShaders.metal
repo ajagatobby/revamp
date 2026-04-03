@@ -445,54 +445,48 @@ fragment float4 atmosphereFragmentShader(
 
     float3 atmosphere = (rayleighSum + mieSum) * exposure;
 
-    // --- Limb glow enhancement ---
-    // The physical scattering naturally creates a blue rim because longer optical
-    // paths at grazing angles scatter more blue light. But we enhance it slightly
-    // with a Schlick Fresnel term for the characteristic bright edge.
+    // --- Soft limb enhancement ---
+    // The ray marching already creates a natural blue rim from longer optical paths.
+    // Add a gentle Schlick Fresnel for subtle brightening (not a hard line).
     float3 entryPoint = camPos + rayDir * tStart;
     float3 entryNorm = normalize(entryPoint);
     float NdotV = abs(dot(entryNorm, -rayDir));
 
-    // Schlick Fresnel: R = R0 + (1-R0)*(1-cos)^5
-    float R0 = 0.02; // Low base reflectance for atmosphere
-    float schlickFresnel = R0 + (1.0 - R0) * pow(1.0 - NdotV, 5.0);
+    float R0 = 0.01;
+    float schlick = R0 + (1.0 - R0) * pow(1.0 - NdotV, 5.0);
 
-    // Day/night sigmoid: 1/(1 + exp(-7*(cosAngle + 0.1)))
     float sunAngle = dot(entryNorm, sunDir);
-    float dayMask = 1.0 / (1.0 + exp(-7.0 * (sunAngle + 0.1)));
+    float dayMask = 1.0 / (1.0 + exp(-5.0 * (sunAngle + 0.15)));
 
-    // Apply Fresnel as limb brightening
-    // Day side: full blue rim. Night side: dim but still visible
-    float rimDayNight = mix(0.4, 1.0, dayMask);
-    float3 rimColor = float3(0.15, 0.4, 1.0) * schlickFresnel * rimDayNight * 1.5;
-    atmosphere += rimColor;
+    // Gentle limb color — subtle, not a hard ring
+    float rimMod = mix(0.3, 1.0, dayMask);
+    atmosphere += float3(0.08, 0.22, 0.6) * schlick * rimMod * 0.5;
 
     // --- Tone Mapping (ACES) ---
     float3 x = atmosphere;
     atmosphere = saturate((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14));
 
-    // Alpha: based on luminance + rim strength
+    // Alpha: from scattering luminance, gentle
     float lum = dot(atmosphere, float3(0.299, 0.587, 0.114));
-    float alpha = saturate(lum * 3.0 + schlickFresnel * 0.8);
+    float alpha = saturate(lum * 2.5 + schlick * 0.3);
 
-    // Dim over planet surface (surface shader handles its own light)
-    alpha = mix(alpha, alpha * 0.45, hitsPlanet);
+    // Reduce over planet surface
+    alpha = mix(alpha, alpha * 0.4, hitsPlanet);
 
     return float4(atmosphere, alpha);
 }
 
-// MARK: - Outer Glow Fragment Shader (Soft Bloom Beyond Atmosphere)
+// MARK: - Outer Glow Fragment Shader (Soft Diffuse Atmospheric Halo)
 //
-// This is NOT the main glow source — the ray marching above handles that.
-// This is a very subtle soft bloom that extends slightly beyond the
-// atmosphere boundary, simulating light scattered into space.
+// Creates a wide, soft, gaussian-like glow that spreads outward from
+// the planet's limb. This simulates scattered light bleeding into space.
+// The key is: LOW Fresnel power + GENTLE radial decay = soft diffuse look.
 
 fragment float4 outerGlowFragmentShader(
     AtmosphereVertexOut in [[stage_in]],
     constant Uniforms &uniforms [[buffer(1)]]
 ) {
     float planetR = uniforms.planetRadius;
-    float atmR = uniforms.atmosphereRadius;
     float3 sunDir = normalize(uniforms.sunDirection);
     float3 camPos = uniforms.cameraPosition;
     float3 rayDir = normalize(in.worldPosition - camPos);
@@ -501,34 +495,53 @@ fragment float4 outerGlowFragmentShader(
     float2 planetHit = raySphereIntersect(camPos, rayDir, float3(0.0), planetR);
     float overPlanet = step(0.0, planetHit.x);
 
+    // Find closest approach to planet surface along this ray
+    // This determines the "limb distance" for glow intensity
+    float3 closestPoint = camPos + rayDir * max(0.0, -dot(camPos, rayDir));
+    float closestDist = length(closestPoint);
+
+    // Normalized distance from planet surface: 0 at surface, 1 at glow edge
+    float glowThickness = planetR * 0.18; // How far the glow extends
+    float limbDist = (closestDist - planetR) / glowThickness;
+    limbDist = saturate(limbDist);
+
+    // Soft gaussian-like falloff from the limb outward
+    // exp(-x^2 * k) creates a smooth bell curve
+    float softGlow = exp(-limbDist * limbDist * 4.0);
+
+    // Additional radial falloff based on fragment distance from planet
+    float fragDist = length(in.worldPosition);
+    float radialNorm = saturate((fragDist - planetR) / glowThickness);
+    float radialFade = exp(-radialNorm * radialNorm * 3.0);
+
+    // Combine: strongest near the limb, fading smoothly outward
+    float glowIntensity = softGlow * radialFade;
+
+    // Day/night: glow is brighter on sunlit side, dimmer but present on dark side
     float3 fragN = normalize(in.worldPosition);
-    float dist = length(in.worldPosition);
-
-    // How far beyond the atmosphere boundary
-    float beyondAtm = (dist - atmR) / (atmR * 0.06); // Normalize to glow thickness
-    float radialFade = saturate(1.0 - beyondAtm);
-    radialFade = radialFade * radialFade * radialFade; // Cubic falloff
-
-    // Fresnel for limb concentration
-    float NdotV = abs(dot(fragN, -rayDir));
-    float fresnel = pow(1.0 - NdotV, 3.0);
-
-    // Day/night sigmoid
     float sunAngle = dot(fragN, sunDir);
-    float dayMask = 1.0 / (1.0 + exp(-7.0 * (sunAngle + 0.1)));
-    float rimMod = mix(0.3, 1.0, dayMask);
+    float dayMask = 1.0 / (1.0 + exp(-5.0 * (sunAngle + 0.15)));
+    float dayNightMod = mix(0.25, 1.0, dayMask);
 
-    // Subtle blue bloom, color from Rayleigh scattering
-    float intensity = fresnel * radialFade * rimMod;
-    float3 color = float3(0.12, 0.32, 0.9) * intensity * 0.5;
+    // Color: soft blue from Rayleigh scattering, slightly desaturated
+    // Inner glow = brighter blue, outer glow = fades to darker/more transparent
+    float3 innerColor = float3(0.15, 0.38, 0.95); // Bright blue near limb
+    float3 outerColor = float3(0.08, 0.20, 0.55); // Darker blue further out
+    float3 glowColor = mix(innerColor, outerColor, limbDist);
 
-    // Very faint Mie forward scatter
-    float mie = pow(max(0.0, dot(rayDir, sunDir)), 20.0) * radialFade;
-    color += float3(0.3, 0.35, 0.5) * mie * 0.15;
+    // Apply intensity and day/night
+    glowColor *= glowIntensity * dayNightMod * 0.7;
 
-    float alpha = saturate(intensity * 0.8 + mie * 0.1) * (1.0 - overPlanet);
+    // Mie forward scatter: warm halo where sun is behind the limb
+    float sunAlign = max(0.0, dot(rayDir, sunDir));
+    float mieHalo = pow(sunAlign, 8.0) * softGlow * dayNightMod;
+    glowColor += float3(0.25, 0.30, 0.45) * mieHalo * 0.3;
 
-    return float4(color, alpha);
+    // Alpha: soft and gradual, no hard edges
+    float alpha = saturate(glowIntensity * dayNightMod * 1.0 + mieHalo * 0.2);
+    alpha *= (1.0 - overPlanet);
+
+    return float4(glowColor, alpha);
 }
 
 // MARK: - Preview Fragment Shader
