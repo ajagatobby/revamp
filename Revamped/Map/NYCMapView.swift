@@ -1,136 +1,157 @@
 import SwiftUI
 import MapKit
 
-struct NYCMapView: View {
+// MARK: - Phase 4: Programmatic MKMapView lifecycle (UIViewRepresentable)
+// MKMapView is created/destroyed with the view lifecycle to prevent memory ballooning.
+
+struct NYCMapView: UIViewRepresentable {
 
     // The International Cozy Inn — 248 Lenox Ave, Harlem
-    private let cozyHotel = CLLocationCoordinate2D(latitude: 40.8012, longitude: -73.9440)
+    static let cozyHotel = CLLocationCoordinate2D(latitude: 40.8012, longitude: -73.9440)
     // Times Square
-    private let timesSquare = CLLocationCoordinate2D(latitude: 40.7580, longitude: -73.9855)
+    static let timesSquare = CLLocationCoordinate2D(latitude: 40.7580, longitude: -73.9855)
 
-    @State private var position: MapCameraPosition = .camera(MapCamera(
-        centerCoordinate: CLLocationCoordinate2D(latitude: 40.7580, longitude: -73.9855),
-        distance: 2000,
-        heading: 0,
-        pitch: 45
-    ))
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
 
-    @State private var mapStyle: MapStyle = .standard(elevation: .realistic)
-    @State private var hasStartedJourney = false
-    @State private var isVisible = false
+    func makeUIView(context: Context) -> MKMapView {
+        let mapView = MKMapView()
+        mapView.mapType = .satelliteFlyover
+        mapView.isZoomEnabled = false
+        mapView.isScrollEnabled = false
+        mapView.isRotateEnabled = false
+        mapView.isPitchEnabled = false
+        mapView.showsCompass = false
+        mapView.showsScale = false
+        mapView.showsUserLocation = false
+        mapView.delegate = context.coordinator
 
-    var body: some View {
-        Map(position: $position, interactionModes: []) {
+        // Phase 1: Attach cached tile overlay for faster re-loads
+        let tileOverlay = CachedTileOverlay()
+        tileOverlay.canReplaceMapContent = false // Supplement, don't replace
+        mapView.addOverlay(tileOverlay, level: .aboveLabels)
+
+        // Initial camera: Times Square overview (loads tiles while hidden behind globe)
+        let initialCamera = MKMapCamera(
+            lookingAtCenter: Self.timesSquare,
+            fromDistance: 2000,
+            pitch: 45,
+            heading: 0
+        )
+        mapView.setCamera(initialCamera, animated: false)
+
+        context.coordinator.mapView = mapView
+        context.coordinator.scheduleJourney()
+
+        return mapView
+    }
+
+    func updateUIView(_ uiView: MKMapView, context: Context) {}
+
+    // MARK: - Coordinator
+
+    class Coordinator: NSObject, MKMapViewDelegate {
+        weak var mapView: MKMapView?
+        private var hasStartedJourney = false
+
+        // Phase 1: Tile overlay renderer
+        func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
+            if let tileOverlay = overlay as? CachedTileOverlay {
+                return MKTileOverlayRenderer(tileOverlay: tileOverlay)
+            }
+            return MKOverlayRenderer(overlay: overlay)
         }
-        .mapStyle(mapStyle)
-        .mapControlVisibility(.hidden)
-        .onAppear {
-            isVisible = true
-            // Pre-position at Times Square with standard tiles (fast load)
-            // Then upgrade to satellite imagery after a moment
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                mapStyle = .imagery(elevation: .realistic)
+
+        func scheduleJourney() {
+            guard !hasStartedJourney else { return }
+            hasStartedJourney = true
+
+            // Give MapKit 1.5 seconds to load initial satellite tiles
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                self?.startJourney()
             }
         }
-        .onDisappear {
-            isVisible = false
-        }
-        .onChange(of: isVisible) { _, visible in
-            if visible && !hasStartedJourney {
-                // Wait for satellite tiles to start loading, then begin
-                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-                    if !hasStartedJourney {
-                        hasStartedJourney = true
-                        startJourney()
-                    }
+
+        private func startJourney() {
+            guard let mapView else { return }
+
+            // Jump to Cozy Hotel
+            let cozyCamera = MKMapCamera(
+                lookingAtCenter: NYCMapView.cozyHotel,
+                fromDistance: 400,
+                pitch: 65,
+                heading: 180
+            )
+            mapView.setCamera(cozyCamera, animated: false)
+
+            // Phase 1: Orbit at Cozy Hotel (2s)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                guard let mapView = self?.mapView else { return }
+                let orbitCamera = MKMapCamera(
+                    lookingAtCenter: NYCMapView.cozyHotel,
+                    fromDistance: 400,
+                    pitch: 65,
+                    heading: 220
+                )
+                UIView.animate(withDuration: 2.0, delay: 0, options: .curveEaseInOut) {
+                    mapView.camera = orbitCamera
                 }
             }
+
+            // Phase 2: Pull up heading south (4s)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
+                guard let mapView = self?.mapView else { return }
+                let midpoint = CLLocationCoordinate2D(
+                    latitude: (NYCMapView.cozyHotel.latitude + NYCMapView.timesSquare.latitude) / 2,
+                    longitude: (NYCMapView.cozyHotel.longitude + NYCMapView.timesSquare.longitude) / 2
+                )
+                let pullUpCamera = MKMapCamera(
+                    lookingAtCenter: midpoint,
+                    fromDistance: 3000,
+                    pitch: 50,
+                    heading: 200
+                )
+                UIView.animate(withDuration: 4.0, delay: 0, options: .curveEaseInOut) {
+                    mapView.camera = pullUpCamera
+                }
+            }
+
+            // Phase 3: Dive into Times Square (4s)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 7.0) { [weak self] in
+                guard let mapView = self?.mapView else { return }
+                let tsCamera = MKMapCamera(
+                    lookingAtCenter: NYCMapView.timesSquare,
+                    fromDistance: 500,
+                    pitch: 70,
+                    heading: 45
+                )
+                UIView.animate(withDuration: 4.0, delay: 0, options: .curveEaseInOut) {
+                    mapView.camera = tsCamera
+                }
+            }
+
+            // Phase 4: Continuous orbit around Times Square
+            DispatchQueue.main.asyncAfter(deadline: .now() + 11.5) { [weak self] in
+                self?.startOrbit(heading: 135)
+            }
         }
-    }
 
-    func resetAndStart() {
-        hasStartedJourney = false
-        position = .camera(MapCamera(
-            centerCoordinate: cozyHotel,
-            distance: 300,
-            heading: 180,
-            pitch: 70
-        ))
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            hasStartedJourney = true
-            startJourney()
-        }
-    }
-
-    private func startJourney() {
-        // Start at Cozy Hotel
-        position = .camera(MapCamera(
-            centerCoordinate: cozyHotel,
-            distance: 400,
-            heading: 180,
-            pitch: 65
-        ))
-
-        // Phase 1: Orbit at Cozy Hotel (2s)
-        withAnimation(.easeInOut(duration: 2.0)) {
-            position = .camera(MapCamera(
-                centerCoordinate: cozyHotel,
-                distance: 400,
-                heading: 220,
-                pitch: 65
-            ))
-        }
-
-        // Phase 2: Pull up heading south (4s)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
-            let midpoint = CLLocationCoordinate2D(
-                latitude: (cozyHotel.latitude + timesSquare.latitude) / 2,
-                longitude: (cozyHotel.longitude + timesSquare.longitude) / 2
+        private func startOrbit(heading: Double) {
+            guard let mapView else { return }
+            let orbitCamera = MKMapCamera(
+                lookingAtCenter: NYCMapView.timesSquare,
+                fromDistance: 500,
+                pitch: 70,
+                heading: heading
             )
-            withAnimation(.easeInOut(duration: 4.0)) {
-                position = .camera(MapCamera(
-                    centerCoordinate: midpoint,
-                    distance: 3000,
-                    heading: 200,
-                    pitch: 50
-                ))
+            UIView.animate(withDuration: 10.0, delay: 0, options: .curveEaseInOut) {
+                mapView.camera = orbitCamera
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 10.0) { [weak self] in
+                let next = heading + 90
+                self?.startOrbit(heading: next >= 360 ? next - 360 : next)
             }
         }
-
-        // Phase 3: Dive into Times Square (4s)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 7.0) {
-            withAnimation(.easeInOut(duration: 4.0)) {
-                position = .camera(MapCamera(
-                    centerCoordinate: timesSquare,
-                    distance: 500,
-                    heading: 45,
-                    pitch: 70
-                ))
-            }
-        }
-
-        // Phase 4: Orbit Times Square
-        DispatchQueue.main.asyncAfter(deadline: .now() + 11.5) {
-            startOrbit(heading: 135)
-        }
     }
-
-    private func startOrbit(heading: Double) {
-        withAnimation(.easeInOut(duration: 10.0)) {
-            position = .camera(MapCamera(
-                centerCoordinate: timesSquare,
-                distance: 500,
-                heading: heading,
-                pitch: 70
-            ))
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 10.0) {
-            let next = heading + 90
-            startOrbit(heading: next >= 360 ? next - 360 : next)
-        }
-    }
-}
-
-#Preview {
-    NYCMapView()
 }
