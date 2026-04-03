@@ -3,47 +3,17 @@ import MapKit
 
 struct NYCMapView: View {
 
-    let cameraDistance: Double
-    let cameraPitch: Double
-
     @State private var position: MapCameraPosition = .camera(MapCamera(
-        centerCoordinate: CLLocationCoordinate2D(latitude: 40.7590, longitude: -73.9845), // Broadway
-        distance: 800,
-        heading: 30,
-        pitch: 65
+        centerCoordinate: CLLocationCoordinate2D(latitude: 40.7580, longitude: -73.9855),
+        distance: 40000,
+        heading: 0,
+        pitch: 0
     ))
 
-    @State private var waypointIndex = 0
-    @State private var isAnimating = false
+    @State private var hasLanded = false
 
-    // Flyover route: Broadway → Times Square with intermediate points
-    private static let waypoints: [(CLLocationCoordinate2D, Double, Double)] = [
-        // (coordinate, heading, distance)
-        // Start: Lower Broadway / Financial District
-        (CLLocationCoordinate2D(latitude: 40.7074, longitude: -74.0113), 15, 600),
-        // City Hall / Brooklyn Bridge area
-        (CLLocationCoordinate2D(latitude: 40.7128, longitude: -74.0060), 20, 700),
-        // SoHo
-        (CLLocationCoordinate2D(latitude: 40.7233, longitude: -73.9985), 25, 750),
-        // Union Square
-        (CLLocationCoordinate2D(latitude: 40.7359, longitude: -73.9911), 30, 800),
-        // Flatiron / Madison Square
-        (CLLocationCoordinate2D(latitude: 40.7411, longitude: -73.9897), 32, 850),
-        // Herald Square
-        (CLLocationCoordinate2D(latitude: 40.7484, longitude: -73.9878), 35, 900),
-        // Times Square
-        (CLLocationCoordinate2D(latitude: 40.7580, longitude: -73.9855), 40, 700),
-        // Times Square close-up, orbit
-        (CLLocationCoordinate2D(latitude: 40.7590, longitude: -73.9845), 90, 500),
-        // Times Square orbit continued
-        (CLLocationCoordinate2D(latitude: 40.7585, longitude: -73.9850), 150, 550),
-        // Full orbit
-        (CLLocationCoordinate2D(latitude: 40.7588, longitude: -73.9848), 220, 500),
-        // Reset heading, pull back slightly
-        (CLLocationCoordinate2D(latitude: 40.7590, longitude: -73.9845), 300, 600),
-        // Loop back to Broadway start
-        (CLLocationCoordinate2D(latitude: 40.7074, longitude: -74.0113), 15, 600),
-    ]
+    // Times Square
+    private let timesSquare = CLLocationCoordinate2D(latitude: 40.7580, longitude: -73.9855)
 
     var body: some View {
         Map(position: $position, interactionModes: []) {
@@ -51,49 +21,52 @@ struct NYCMapView: View {
         .mapStyle(.imagery(elevation: .realistic))
         .mapControlVisibility(.hidden)
         .onAppear {
-            startFlyover()
+            if !hasLanded {
+                diveToTimesSquare()
+            }
         }
     }
 
-    private func startFlyover() {
-        guard !isAnimating else { return }
-        isAnimating = true
-        waypointIndex = 0
-        flyToNextWaypoint()
+    private func diveToTimesSquare() {
+        // Straight dive from high altitude to Times Square street level
+        // No stops, no pauses — one continuous swoop
+        withAnimation(.easeInOut(duration: 4.0)) {
+            position = .camera(MapCamera(
+                centerCoordinate: timesSquare,
+                distance: 600,
+                heading: 45,
+                pitch: 70
+            ))
+        }
+
+        // After landing, slow orbit around Times Square
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4.5) {
+            hasLanded = true
+            startOrbit()
+        }
     }
 
-    private func flyToNextWaypoint() {
-        let waypoints = Self.waypoints
-        guard waypointIndex < waypoints.count else {
-            // Loop: restart from beginning
-            waypointIndex = 0
-            flyToNextWaypoint()
-            return
+    private func startOrbit() {
+        orbitStep(heading: 135)
+    }
+
+    private func orbitStep(heading: Double) {
+        withAnimation(.easeInOut(duration: 8.0)) {
+            position = .camera(MapCamera(
+                centerCoordinate: timesSquare,
+                distance: 600,
+                heading: heading,
+                pitch: 70
+            ))
         }
 
-        let (coord, heading, distance) = waypoints[waypointIndex]
-        let camera = MapCamera(
-            centerCoordinate: coord,
-            distance: distance,
-            heading: heading,
-            pitch: 65
-        )
-
-        // Duration varies: longer for big moves, shorter for orbits
-        let duration: Double = waypointIndex < 7 ? 6.0 : 4.0
-
-        withAnimation(.easeInOut(duration: duration)) {
-            position = .camera(camera)
-        }
-
-        waypointIndex += 1
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + duration) {
-            flyToNextWaypoint()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 8.0) {
+            let nextHeading = heading + 90.0
+            self.orbitStep(heading: nextHeading >= 360 ? nextHeading - 360 : nextHeading)
         }
     }
 }
 
 #Preview {
-    NYCMapView(cameraDistance: 800, cameraPitch: 65)
+    NYCMapView()
 }

@@ -49,50 +49,36 @@ struct ContentView: View {
     @State private var zoom: Float = 3.0
     @Namespace private var selectionNamespace
 
-    private let minZoom: Float = 1.5
-    private let maxZoom: Float = 8.0
+    private let minZoom: Float = 0.5
+    private let maxZoom: Float = 5.0
+
+    // Transition threshold — auto-trigger when zoom hits this
+    private let transitionThreshold: Float = 0.7
 
     // Globe vs map mode
-    @State private var showingMap = false
     @State private var transitionPhase: TransitionPhase = .globe
 
     enum TransitionPhase {
-        case globe       // Normal globe view
-        case zoomingIn   // Globe scaling up + blur → white flash
-        case map         // 3D NYC map visible
+        case globe
+        case zoomingIn   // Globe scaling + blur → flash
+        case map         // 3D NYC map
         case zoomingOut  // Map fading → globe returns
     }
 
-    private var mapVisible: Bool {
-        transitionPhase == .map
-    }
-
-    private var mapCameraDistance: Double {
-        let t = Double((zoom - 1.5) / (2.0 - 1.5))
-        let clamped = min(max(t, 0), 1)
-        return 800.0 * pow(30000.0 / 800.0, clamped)
-    }
-
-    private var mapCameraPitch: Double {
-        let t = Double((zoom - 1.5) / (2.0 - 1.5))
-        return 65.0 * (1.0 - min(max(t, 0), 1))
-    }
+    private var isInMap: Bool { transitionPhase == .map }
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
 
-            // --- Map layer (always mounted for preloading, hidden behind globe) ---
-            NYCMapView(
-                cameraDistance: mapCameraDistance,
-                cameraPitch: mapCameraPitch
-            )
-            .ignoresSafeArea()
-            .opacity(mapVisible ? 1 : 0)
-            .scaleEffect(transitionPhase == .zoomingOut ? 0.8 : 1.0)
-            .allowsHitTesting(transitionPhase == .map)
+            // --- Map layer (always mounted for preloading) ---
+            NYCMapView()
+                .ignoresSafeArea()
+                .opacity(isInMap ? 1 : 0)
+                .scaleEffect(transitionPhase == .zoomingOut ? 0.8 : 1.0)
+                .allowsHitTesting(isInMap)
 
-            // --- Globe layer (on top of map) ---
+            // --- Globe layer ---
             if transitionPhase != .map {
                 MetalGlobeView(activeTextureIndex: $activeTextureIndex, zoom: $zoom)
                     .ignoresSafeArea()
@@ -102,7 +88,7 @@ struct ContentView: View {
                     .allowsHitTesting(transitionPhase == .globe)
             }
 
-            // --- White flash overlay ---
+            // --- White flash ---
             Color.white
                 .ignoresSafeArea()
                 .opacity(transitionPhase == .zoomingIn ? 0.6 : 0)
@@ -116,36 +102,16 @@ struct ContentView: View {
             textureSelector
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
                 .padding(.trailing, 14)
-                .opacity(transitionPhase == .map ? 0 : 1)
-                .allowsHitTesting(transitionPhase == .globe)
+                .opacity(isInMap ? 0 : 1)
+                .allowsHitTesting(!isInMap)
 
             activeTag
                 .frame(maxHeight: .infinity, alignment: .bottom)
                 .padding(.bottom, 44)
+                .opacity(isInMap ? 0 : 1)
 
-            // --- Explore NYC button (appears at close zoom) ---
-            if transitionPhase == .globe && zoom < 2.0 {
-                Button {
-                    triggerTransitionToMap()
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "building.2.fill")
-                            .font(.system(size: 13))
-                        Text("Explore NYC")
-                            .font(.system(size: 13, weight: .semibold))
-                    }
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
-                    .background(Color.blue, in: Capsule())
-                }
-                .transition(.scale.combined(with: .opacity))
-                .frame(maxHeight: .infinity, alignment: .bottom)
-                .padding(.bottom, 90)
-            }
-
-            // --- Back button in map mode ---
-            if transitionPhase == .map {
+            // --- Back to globe button (map mode only) ---
+            if isInMap {
                 Button {
                     triggerTransitionToGlobe()
                 } label: {
@@ -166,34 +132,34 @@ struct ContentView: View {
                 .padding(.leading, 16)
             }
         }
-        .animation(.easeInOut(duration: 0.15), value: zoom < 2.0)
-        .animation(.spring(response: 0.5, dampingFraction: 0.85), value: transitionPhase == .map)
+        .animation(.spring(response: 0.5, dampingFraction: 0.85), value: isInMap)
+        .onChange(of: zoom) { _, newZoom in
+            // Auto-transition to map when zoom hits threshold
+            if newZoom <= transitionThreshold && transitionPhase == .globe {
+                triggerTransitionToMap()
+            }
+        }
     }
 
     private func triggerTransitionToMap() {
-        // Phase 1: Globe zooms in with blur + flash
         withAnimation(.easeIn(duration: 0.5)) {
             transitionPhase = .zoomingIn
         }
-        // Phase 2: Switch to map after flash
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
             withAnimation(.easeOut(duration: 0.6)) {
                 transitionPhase = .map
-                zoom = 1.6
             }
         }
     }
 
     private func triggerTransitionToGlobe() {
-        // Phase 1: Map fades + shrinks
         withAnimation(.easeIn(duration: 0.4)) {
             transitionPhase = .zoomingOut
         }
-        // Phase 2: Return to globe
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
             withAnimation(.easeOut(duration: 0.5)) {
                 transitionPhase = .globe
-                zoom = 3.0
+                zoom = 2.0
             }
         }
     }
