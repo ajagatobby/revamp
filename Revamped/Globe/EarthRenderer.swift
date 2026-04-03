@@ -57,14 +57,14 @@ final class EarthRenderer: NSObject, MTKViewDelegate {
     // Camera & interaction
     var rotationX: Float = 0.2
     var rotationY: Float = 0.0
-    var zoom: Float = 3.0 // Target zoom (set by UI/gestures)
+    var zoom: Float = 5.0 // Target zoom (set by UI/gestures)
     private var animatedZoom: Float = 5.0 // Current animated zoom value
     private var startTime: CFTimeInterval = 0
 
-    // Intro animation
+    // Intro animation: start far away (small globe), zoom in
     private let introStartZoom: Float = 5.0
-    private let introEndZoom: Float = 3.0
-    private let introDuration: Float = 2.5 // seconds
+    private let introEndZoom: Float = 0.6  // Zoom all the way in to trigger map transition
+    private let introDuration: Float = 4.0 // seconds
     private var introComplete = false
 
     // Zoom animation smoothing (0 = instant, 1 = never reaches target)

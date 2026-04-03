@@ -46,7 +46,7 @@ private let liquidSpring = Animation.spring(response: 0.5, dampingFraction: 0.7,
 struct ContentView: View {
 
     @State private var activeTextureIndex = 0
-    @State private var zoom: Float = 3.0
+    @State private var zoom: Float = 5.0 // Start far away (small globe)
     @Namespace private var selectionNamespace
 
     private let minZoom: Float = 0.5
@@ -57,6 +57,7 @@ struct ContentView: View {
 
     // Globe vs map mode
     @State private var transitionPhase: TransitionPhase = .globe
+    @State private var hasAutoTriggered = false
 
     enum TransitionPhase {
         case globe
@@ -135,7 +136,8 @@ struct ContentView: View {
         .animation(.spring(response: 0.5, dampingFraction: 0.85), value: isInMap)
         .onChange(of: zoom) { _, newZoom in
             // Auto-transition to map when zoom hits threshold
-            if newZoom <= transitionThreshold && transitionPhase == .globe {
+            if newZoom <= transitionThreshold && transitionPhase == .globe && !hasAutoTriggered {
+                hasAutoTriggered = true
                 triggerTransitionToMap()
             }
         }

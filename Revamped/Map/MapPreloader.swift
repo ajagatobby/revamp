@@ -8,19 +8,19 @@ final class MapPreloader {
     static let shared = MapPreloader()
     private var isPreloading = false
 
-    // Same waypoints as NYCMapView flyover route
+    // Cozy Hotel → Times Square journey waypoints for preloading
     private let waypoints: [(CLLocationCoordinate2D, Double, Double)] = [
-        (CLLocationCoordinate2D(latitude: 40.7074, longitude: -74.0113), 15, 600),
-        (CLLocationCoordinate2D(latitude: 40.7128, longitude: -74.0060), 20, 700),
-        (CLLocationCoordinate2D(latitude: 40.7233, longitude: -73.9985), 25, 750),
-        (CLLocationCoordinate2D(latitude: 40.7359, longitude: -73.9911), 30, 800),
-        (CLLocationCoordinate2D(latitude: 40.7411, longitude: -73.9897), 32, 850),
-        (CLLocationCoordinate2D(latitude: 40.7484, longitude: -73.9878), 35, 900),
-        (CLLocationCoordinate2D(latitude: 40.7580, longitude: -73.9855), 40, 700),
-        (CLLocationCoordinate2D(latitude: 40.7590, longitude: -73.9845), 90, 500),
-        (CLLocationCoordinate2D(latitude: 40.7585, longitude: -73.9850), 150, 550),
-        (CLLocationCoordinate2D(latitude: 40.7588, longitude: -73.9848), 220, 500),
-        (CLLocationCoordinate2D(latitude: 40.7590, longitude: -73.9845), 300, 600),
+        // Cozy Hotel (248 Lenox Ave, Harlem)
+        (CLLocationCoordinate2D(latitude: 40.8012, longitude: -73.9440), 180, 400),
+        (CLLocationCoordinate2D(latitude: 40.8012, longitude: -73.9440), 220, 300),
+        // Midpoint (pull-up view)
+        (CLLocationCoordinate2D(latitude: 40.7796, longitude: -73.9648), 200, 3000),
+        // Times Square approach
+        (CLLocationCoordinate2D(latitude: 40.7580, longitude: -73.9855), 45, 500),
+        // Times Square orbit angles
+        (CLLocationCoordinate2D(latitude: 40.7580, longitude: -73.9855), 135, 500),
+        (CLLocationCoordinate2D(latitude: 40.7580, longitude: -73.9855), 225, 500),
+        (CLLocationCoordinate2D(latitude: 40.7580, longitude: -73.9855), 315, 500),
     ]
 
     private init() {}
