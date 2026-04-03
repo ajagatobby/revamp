@@ -8,6 +8,8 @@ struct NYCMapView: View {
     static let cozyHotel = CLLocationCoordinate2D(latitude: 40.8012, longitude: -73.9440)
     static let timesSquare = CLLocationCoordinate2D(latitude: 40.7580, longitude: -73.9855)
 
+    var onArrivedTimesSquare: (() -> Void)?
+
     // Cached snapshot shown instantly while MKMapView loads tiles
     @State private var placeholderImage: UIImage?
     @State private var tilesLoaded = false
@@ -19,7 +21,7 @@ struct NYCMapView: View {
                 withAnimation(.easeOut(duration: 0.5)) {
                     tilesLoaded = true
                 }
-            })
+            }, onArrivedTimesSquare: onArrivedTimesSquare)
 
             // Snapshot placeholder — shown instantly, fades out when tiles ready
             if let placeholderImage, !tilesLoaded {
@@ -43,9 +45,10 @@ struct NYCMapView: View {
 private struct LiveMapView: UIViewRepresentable {
 
     var onTilesLoaded: () -> Void
+    var onArrivedTimesSquare: (() -> Void)?
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(onTilesLoaded: onTilesLoaded)
+        Coordinator(onTilesLoaded: onTilesLoaded, onArrivedTimesSquare: onArrivedTimesSquare)
     }
 
     func makeUIView(context: Context) -> MKMapView {
@@ -84,9 +87,11 @@ private struct LiveMapView: UIViewRepresentable {
         private var hasStartedJourney = false
         private var hasNotifiedTilesLoaded = false
         var onTilesLoaded: () -> Void
+        var onArrivedTimesSquare: (() -> Void)?
 
-        init(onTilesLoaded: @escaping () -> Void) {
+        init(onTilesLoaded: @escaping () -> Void, onArrivedTimesSquare: (() -> Void)?) {
             self.onTilesLoaded = onTilesLoaded
+            self.onArrivedTimesSquare = onArrivedTimesSquare
         }
 
         deinit {}
@@ -129,7 +134,8 @@ private struct LiveMapView: UIViewRepresentable {
                                     waypoints: [(CLLocationCoordinate2D, Double, Double, Double, TimeInterval)],
                                     mapView: MKMapView) {
             guard index < waypoints.count else {
-                // Journey complete — start orbit
+                // Journey complete — notify and start orbit
+                onArrivedTimesSquare?()
                 startOrbit(mapView: mapView)
                 return
             }

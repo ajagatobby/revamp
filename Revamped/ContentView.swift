@@ -65,6 +65,7 @@ struct ContentView: View {
     // Globe vs map mode
     @State private var transitionPhase: TransitionPhase = .globe
     @State private var hasAutoTriggered = false
+    @State private var showGradient = false
 
     enum TransitionPhase {
         case globe
@@ -95,10 +96,35 @@ struct ContentView: View {
             Color.black.ignoresSafeArea()
 
             // --- Map layer (always mounted, fades in) ---
-            NYCMapView()
+            NYCMapView(onArrivedTimesSquare: {
+                withAnimation(.easeIn(duration: 1.5)) {
+                    showGradient = true
+                }
+            })
                 .ignoresSafeArea()
                 .opacity(mapAlpha)
                 .allowsHitTesting(isInMap)
+
+            // --- Gradient overlay (appears when arriving at Times Square) ---
+            if showGradient {
+                VStack {
+                    Spacer()
+                    LinearGradient(
+                        stops: [
+                            .init(color: .clear, location: 0),
+                            .init(color: .black.opacity(0.3), location: 0.3),
+                            .init(color: .black.opacity(0.7), location: 0.65),
+                            .init(color: .black.opacity(0.9), location: 1.0),
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                    .frame(height: 350)
+                }
+                .ignoresSafeArea()
+                .allowsHitTesting(false)
+                .transition(.opacity)
+            }
 
             // --- Globe layer (always mounted, fades out — no blur, no destroy) ---
             MetalGlobeView(activeTextureIndex: $activeTextureIndex, zoom: $zoom)
