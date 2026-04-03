@@ -52,7 +52,7 @@ private let liquidSpring = Animation.spring(response: 0.5, dampingFraction: 0.7,
 
 struct ContentView: View {
 
-    @State private var activeTextureIndex = 1 // Day texture
+    @State private var activeTextureIndex = 0
     @State private var zoom: Float = 5.0 // Start far away (small globe)
     @Namespace private var selectionNamespace
 
@@ -106,23 +106,6 @@ struct ContentView: View {
                 .scaleEffect(globeScale)
                 .opacity(globeAlpha)
                 .allowsHitTesting(transitionPhase == .globe)
-
-            // --- Controls ---
-            zoomControls
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-                .padding(.leading, 16)
-                .opacity(transitionPhase == .globe ? 1 : 0)
-
-            textureSelector
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
-                .padding(.trailing, 14)
-                .opacity(transitionPhase == .globe ? 1 : 0)
-                .allowsHitTesting(transitionPhase == .globe)
-
-            activeTag
-                .frame(maxHeight: .infinity, alignment: .bottom)
-                .padding(.bottom, 44)
-                .opacity(transitionPhase == .globe ? 1 : 0)
 
             // --- Back to globe button ---
             if isInMap {
