@@ -105,22 +105,19 @@ struct ContentView: View {
                 .opacity(mapAlpha)
                 .allowsHitTesting(isInMap)
 
-            // --- Gradient overlay (appears when arriving at Times Square) ---
+            // --- Bright blue gradient overlay (appears when arriving at Times Square) ---
             if showGradient {
-                VStack {
-                    Spacer()
-                    LinearGradient(
-                        stops: [
-                            .init(color: .clear, location: 0),
-                            .init(color: .black.opacity(0.3), location: 0.3),
-                            .init(color: .black.opacity(0.7), location: 0.65),
-                            .init(color: .black.opacity(0.9), location: 1.0),
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                    .frame(height: 350)
-                }
+                LinearGradient(
+                    stops: [
+                        .init(color: Color(red: 0.1, green: 0.2, blue: 1.0).opacity(0.9), location: 0),
+                        .init(color: Color(red: 0.15, green: 0.3, blue: 1.0).opacity(0.75), location: 0.35),
+                        .init(color: Color(red: 0.2, green: 0.4, blue: 1.0).opacity(0.5), location: 0.6),
+                        .init(color: Color(red: 0.25, green: 0.45, blue: 0.95).opacity(0.25), location: 0.8),
+                        .init(color: .clear, location: 1.0),
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
                 .ignoresSafeArea()
                 .allowsHitTesting(false)
                 .transition(.opacity)
