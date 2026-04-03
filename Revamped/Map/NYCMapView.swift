@@ -60,11 +60,12 @@ private struct LiveMapView: UIViewRepresentable {
         mapView.showsUserLocation = false
         mapView.delegate = context.coordinator
 
+        // Start at Cozy Hotel — same as journey start. No jump.
         let initialCamera = MKMapCamera(
-            lookingAtCenter: NYCMapView.timesSquare,
-            fromDistance: 2000,
-            pitch: 45,
-            heading: 0
+            lookingAtCenter: NYCMapView.cozyHotel,
+            fromDistance: 400,
+            pitch: 65,
+            heading: 180
         )
         mapView.setCamera(initialCamera, animated: false)
 
@@ -107,16 +108,9 @@ private struct LiveMapView: UIViewRepresentable {
         private func startJourney() {
             guard let mapView else { return }
 
-            let cozyCamera = MKMapCamera(
-                lookingAtCenter: NYCMapView.cozyHotel,
-                fromDistance: 400,
-                pitch: 65,
-                heading: 180
-            )
-            mapView.setCamera(cozyCamera, animated: false)
-
+            // Camera is already at Cozy Hotel (set in makeUIView) — no jump needed.
             // Phase 1: Orbit Cozy Hotel
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
                 guard let mapView = self?.mapView else { return }
                 UIView.animate(withDuration: 2.0, delay: 0, options: .curveEaseInOut) {
                     mapView.camera = MKMapCamera(

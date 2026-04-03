@@ -10,13 +10,13 @@ struct RevampedApp: App {
             directory: nil
         )
 
-        // Pre-warm snapshot cache — generates a static image of Times Square
-        // on a background thread. If already cached on disk, this is a no-op.
+        // Pre-warm snapshot cache — generates a static image of Cozy Hotel
+        // (journey start point). If already cached on disk, this is a no-op.
         MapSnapshotCache.shared.prewarm(
-            center: NYCMapView.timesSquare,
-            distance: 2000,
-            heading: 0,
-            pitch: 45,
+            center: NYCMapView.cozyHotel,
+            distance: 400,
+            heading: 180,
+            pitch: 65,
             key: "nyc_initial"
         )
     }
