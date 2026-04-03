@@ -107,27 +107,7 @@ struct ContentView: View {
                 .opacity(globeAlpha)
                 .allowsHitTesting(transitionPhase == .globe)
 
-            // --- Back to globe button ---
-            if isInMap {
-                Button {
-                    triggerTransitionToGlobe()
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "globe")
-                            .font(.system(size: 13))
-                        Text("Back to Globe")
-                            .font(.system(size: 13, weight: .semibold))
-                    }
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
-                    .background(Color.white.opacity(0.15), in: Capsule())
-                }
-                .transition(.opacity)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .padding(.top, 60)
-                .padding(.leading, 16)
-            }
+
         }
         .onAppear {
             startAutoSequence()
