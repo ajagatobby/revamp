@@ -3,7 +3,7 @@ import SwiftUI
 struct ContentView: View {
 
     @State private var activeTextureIndex = 0
-    @State private var zoom: Float = 3.0
+    @State private var zoom: Float = 4.2 // Far enough that globe appears small on welcome
 
     // Phases
     @State private var transitionPhase: TransitionPhase = .welcome
@@ -55,11 +55,9 @@ struct ContentView: View {
                     .allowsHitTesting(false)
             }
 
-            // --- Globe layer (pushed down so it sits below the title) ---
+            // --- Globe layer (fullscreen, no clipping — zoom controls size) ---
             MetalGlobeView(activeTextureIndex: $activeTextureIndex, zoom: $zoom)
                 .ignoresSafeArea()
-                .scaleEffect(transitionPhase == .zoomingIn ? 1.5 : 0.6)
-                .offset(y: transitionPhase == .welcome ? 120 : 0)
                 .opacity(transitionPhase == .welcome ? 1.0 : 0.0)
                 .allowsHitTesting(false)
 
@@ -141,13 +139,13 @@ struct ContentView: View {
             showButton = false
         }
 
-        // Start zoom in
+        // Zoom globe in (renderer lerps smoothly from 4.2 → 0.5)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
             zoom = 0.5
         }
 
-        // Transition to map after zoom
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+        // Transition to map after globe zooms in
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
             SoundEngine.shared.playWhoosh()
             withAnimation(.easeInOut(duration: 1.2)) {
                 transitionPhase = .zoomingIn
