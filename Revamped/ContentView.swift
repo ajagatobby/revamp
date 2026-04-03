@@ -3,7 +3,8 @@ import SwiftUI
 struct ContentView: View {
 
     @State private var activeTextureIndex = 0
-    @State private var zoom: Float = 4.2 // Far enough that globe appears small on welcome
+    @State private var zoom: Float = 4.2
+    @State private var mapOpacity: Double = 0
 
     // Phases
     @State private var transitionPhase: TransitionPhase = .welcome
@@ -23,7 +24,12 @@ struct ContentView: View {
         ZStack {
             Color.black.ignoresSafeArea()
 
-            // --- Map layer (always mounted for preloading) ---
+            // --- Globe layer (bottom — always visible until map fully covers it) ---
+            MetalGlobeView(activeTextureIndex: $activeTextureIndex, zoom: $zoom)
+                .ignoresSafeArea()
+                .allowsHitTesting(false)
+
+            // --- Map layer (fades in ON TOP of globe — creates morph effect) ---
             NYCMapView(onArrivedTimesSquare: {
                 SoundEngine.shared.playReveal()
                 withAnimation(.easeIn(duration: 1.5)) {
@@ -31,7 +37,7 @@ struct ContentView: View {
                 }
             })
             .ignoresSafeArea()
-            .opacity(transitionPhase == .map ? 1 : 0)
+            .opacity(mapOpacity)
             .allowsHitTesting(isInMap)
 
             // --- Gradient overlay ---
@@ -54,12 +60,6 @@ struct ContentView: View {
                 KineticTextView()
                     .allowsHitTesting(false)
             }
-
-            // --- Globe layer (fullscreen, stays visible during zoomIn, fades in map phase) ---
-            MetalGlobeView(activeTextureIndex: $activeTextureIndex, zoom: $zoom)
-                .ignoresSafeArea()
-                .opacity(transitionPhase == .map ? 0.0 : 1.0)
-                .allowsHitTesting(false)
 
             // --- Welcome overlay: Title + Button ---
             if transitionPhase == .welcome {
@@ -133,25 +133,28 @@ struct ContentView: View {
     private func getIn() {
         SoundEngine.shared.playSwoosh()
 
-        // 1. Fade out title + button
+        // 1. Fade out title + button immediately
         withAnimation(.easeIn(duration: 0.3)) {
             showTitle = false
             showButton = false
         }
 
-        // 2. Zoom globe in (renderer lerps 4.2 → 0.5)
+        // 2. Zoom globe in hard (4.2 → 0.5 = fills screen)
         zoom = 0.5
 
-        // 3. After globe fills the screen (~2s for lerp to get close),
-        //    crossfade: globe fades out + map fades in simultaneously
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+        // 3. While globe is zooming in, start fading map in on top
+        //    Globe is still underneath — they blend together = morph
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
             SoundEngine.shared.playWhoosh()
-            withAnimation(.easeInOut(duration: 1.5)) {
-                transitionPhase = .map
+            withAnimation(.easeIn(duration: 2.0)) {
+                mapOpacity = 1.0
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
-                SoundEngine.shared.playImpact()
-            }
+        }
+
+        // 4. Once map is fully visible, mark as map phase
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+            SoundEngine.shared.playImpact()
+            transitionPhase = .map
         }
     }
 }
