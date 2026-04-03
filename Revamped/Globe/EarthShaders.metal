@@ -186,7 +186,7 @@ kernel void computeTransmittanceLUT(
     if (gid.x >= uint(LUT_TRANSMITTANCE_W) || gid.y >= uint(LUT_TRANSMITTANCE_H)) return;
 
     float planetR = 1.0;
-    float atmR = 1.025;
+    float atmR = 1.04;
 
     // Map pixel coords to (cosZenith, height)
     float u = float(gid.x) / float(LUT_TRANSMITTANCE_W - 1);
@@ -231,7 +231,7 @@ kernel void computeMultipleScatteringLUT(
     if (gid.x >= uint(LUT_MULTISCATTER_SIZE) || gid.y >= uint(LUT_MULTISCATTER_SIZE)) return;
 
     float planetR = 1.0;
-    float atmR = 1.025;
+    float atmR = 1.04;
 
     float u = float(gid.x) / float(LUT_MULTISCATTER_SIZE - 1);
     float v = float(gid.y) / float(LUT_MULTISCATTER_SIZE - 1);
@@ -598,4 +598,84 @@ fragment float4 previewFragmentShader(
     float lighting = diffuse * 0.7 + 0.3;
 
     return float4(texColor.rgb * lighting, 1.0);
+}
+
+// MARK: - Outer Glow Fragment Shader (Ambient Fresnel Halo)
+//
+// This implements the shader-based approach: a soft, ambient atmospheric glow
+// that extends beyond the physical atmosphere sphere. It uses:
+// 1. Base atmosphere color masked by sun incidence (day/night)
+// 2. Fresnel effect for edge-brightening that decreases transparency at grazing angles
+// Combined with additive blending, this creates the visible halo ring around Earth.
+
+fragment float4 outerGlowFragmentShader(
+    AtmosphereVertexOut in [[stage_in]],
+    constant Uniforms &uniforms [[buffer(1)]]
+) {
+    float planetR = uniforms.planetRadius;
+    float3 sunDir = normalize(uniforms.sunDirection);
+    float3 camPos = uniforms.cameraPosition;
+    float3 fragWorldPos = in.worldPosition;
+    float3 rayDir = normalize(fragWorldPos - camPos);
+
+    // --- Step 1: Base Atmosphere Color & Sunlight Mask ---
+    // Compute sun incidence at the closest surface point along this ray
+    float2 planetHit = raySphereIntersect(camPos, rayDir, float3(0.0), planetR);
+
+    // Use the atmosphere entry point's normal for sun angle calculation
+    float3 closestNormal = normalize(fragWorldPos);
+
+    // cos(angle) between sun direction and surface normal
+    float sunCosAngle = dot(closestNormal, sunDir);
+
+    // Day/night mask: smooth transition with exponential falloff
+    // Glow visible on day side, fading across the terminator
+    float mixAmount = saturate(sunCosAngle * 1.8 + 0.4);
+    mixAmount = pow(mixAmount, 1.2);
+
+    // Base atmosphere color: blue tint weighted by Rayleigh wavelength dependence
+    // (shorter wavelengths scatter more: 1/lambda^4)
+    float3 atmosphereColor = float3(0.3, 0.55, 1.0);
+
+    // --- Step 2: Fresnel Effect (Edge Glow) ---
+    // Calculate angle between camera-to-surface vector and surface normal
+    float3 viewDir = -rayDir;
+    float NdotV = abs(dot(closestNormal, viewDir));
+
+    // As angle approaches 90° (edges), NdotV -> 0, fresnel -> 1
+    // This makes the atmosphere LESS transparent at the edges = thicker glowing ring
+    float fresnel = 1.0 - NdotV;
+
+    // Distance from planet center to determine falloff
+    float distFromCenter = length(fragWorldPos);
+    float normalizedDist = (distFromCenter - planetR) / (uniforms.atmosphereRadius * 1.1 - planetR);
+
+    // Smooth radial falloff: glow fades as we get further from the planet
+    float radialFalloff = saturate(1.0 - normalizedDist);
+    radialFalloff = radialFalloff * radialFalloff; // Quadratic falloff
+
+    // Combine Fresnel with radial falloff for the final glow intensity
+    // High power Fresnel = thin, bright ring at the edge
+    float glowIntensity = pow(fresnel, 2.5) * radialFalloff;
+
+    // Mask the glow by day/night (the algorithm's mixAmount step)
+    float3 glowColor = atmosphereColor * glowIntensity * mixAmount * 0.6;
+
+    // --- Mie forward scattering halo around sun ---
+    // Add a subtle warm halo where the sun is directly behind the atmosphere
+    float sunAlignment = max(0.0, dot(rayDir, sunDir));
+    float mieGlow = pow(sunAlignment, 12.0) * mixAmount * radialFalloff;
+    glowColor += float3(1.0, 0.85, 0.6) * mieGlow * 0.25;
+
+    // --- Night side subtle rim ---
+    float nightFresnel = pow(fresnel, 4.0) * (1.0 - mixAmount) * radialFalloff;
+    glowColor += float3(0.05, 0.08, 0.18) * nightFresnel;
+
+    // Alpha: Fresnel-driven transparency decrease at edges, masked by day/night
+    float alpha = saturate(glowIntensity * mixAmount * 1.2 + mieGlow * 0.5 + nightFresnel * 0.3);
+
+    // Don't draw glow over the planet itself
+    alpha *= 1.0 - step(0.0, planetHit.x);
+
+    return float4(glowColor, alpha);
 }

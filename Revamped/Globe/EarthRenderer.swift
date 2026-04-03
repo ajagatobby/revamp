@@ -31,6 +31,7 @@ final class EarthRenderer: NSObject, MTKViewDelegate {
     // Pipelines
     private var earthPipelineState: MTLRenderPipelineState!
     private var atmospherePipelineState: MTLRenderPipelineState!
+    private var outerGlowPipelineState: MTLRenderPipelineState!
     private var previewPipelineState: MTLRenderPipelineState!
     private var transmittanceLUTComputePipeline: MTLComputePipelineState!
     private var multiScatterLUTComputePipeline: MTLComputePipelineState!
@@ -42,6 +43,7 @@ final class EarthRenderer: NSObject, MTKViewDelegate {
     // Meshes
     private var earthMesh: MTKMesh!
     private var atmosphereMesh: MTKMesh!
+    private var outerGlowMesh: MTKMesh!
 
     // Textures
     private var dayTexture: MTLTexture!
@@ -69,7 +71,8 @@ final class EarthRenderer: NSObject, MTKViewDelegate {
 
     // Globe parameters
     private let planetRadius: Float = 1.0
-    private let atmosphereRadius: Float = 1.025
+    private let atmosphereRadius: Float = 1.04
+    private let outerGlowRadius: Float = 1.12 // Soft ambient glow extends further
 
     // Vertex descriptor for MDLMesh
     private var vertexDescriptor: MTLVertexDescriptor!
@@ -197,9 +200,27 @@ final class EarthRenderer: NSObject, MTKViewDelegate {
             bitangentAttributeNamed: MDLVertexAttributeBitangent
         )
 
+        // Outer glow sphere (extends further for soft ambient halo)
+        let glowMDL = MDLMesh.newEllipsoid(
+            withRadii: SIMD3<Float>(repeating: outerGlowRadius),
+            radialSegments: 48,
+            verticalSegments: 32,
+            geometryType: .triangles,
+            inwardNormals: false,
+            hemisphere: false,
+            allocator: allocator
+        )
+        glowMDL.vertexDescriptor = mdlVertexDescriptor
+        glowMDL.addTangentBasis(
+            forTextureCoordinateAttributeNamed: MDLVertexAttributeTextureCoordinate,
+            tangentAttributeNamed: MDLVertexAttributeTangent,
+            bitangentAttributeNamed: MDLVertexAttributeBitangent
+        )
+
         do {
             earthMesh = try MTKMesh(mesh: earthMDL, device: device)
             atmosphereMesh = try MTKMesh(mesh: atmMDL, device: device)
+            outerGlowMesh = try MTKMesh(mesh: glowMDL, device: device)
         } catch {
             fatalError("Failed to create meshes: \(error)")
         }
@@ -229,6 +250,19 @@ final class EarthRenderer: NSObject, MTKViewDelegate {
         atmPipelineDesc.depthAttachmentPixelFormat = .depth32Float
         atmPipelineDesc.vertexDescriptor = vertexDescriptor
 
+        // Outer glow pipeline (additive blending for soft ambient halo)
+        let glowPipelineDesc = MTLRenderPipelineDescriptor()
+        glowPipelineDesc.vertexFunction = library.makeFunction(name: "atmosphereVertexShader")
+        glowPipelineDesc.fragmentFunction = library.makeFunction(name: "outerGlowFragmentShader")
+        glowPipelineDesc.colorAttachments[0].pixelFormat = .bgra8Unorm
+        glowPipelineDesc.colorAttachments[0].isBlendingEnabled = true
+        glowPipelineDesc.colorAttachments[0].sourceRGBBlendFactor = .sourceAlpha
+        glowPipelineDesc.colorAttachments[0].destinationRGBBlendFactor = .one // Additive
+        glowPipelineDesc.colorAttachments[0].sourceAlphaBlendFactor = .one
+        glowPipelineDesc.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
+        glowPipelineDesc.depthAttachmentPixelFormat = .depth32Float
+        glowPipelineDesc.vertexDescriptor = vertexDescriptor
+
         // Preview pipeline (single texture on globe)
         let previewPipelineDesc = MTLRenderPipelineDescriptor()
         previewPipelineDesc.vertexFunction = library.makeFunction(name: "earthVertexShader")
@@ -246,6 +280,7 @@ final class EarthRenderer: NSObject, MTKViewDelegate {
         do {
             earthPipelineState = try device.makeRenderPipelineState(descriptor: earthPipelineDesc)
             atmospherePipelineState = try device.makeRenderPipelineState(descriptor: atmPipelineDesc)
+            outerGlowPipelineState = try device.makeRenderPipelineState(descriptor: glowPipelineDesc)
             previewPipelineState = try device.makeRenderPipelineState(descriptor: previewPipelineDesc)
             transmittanceLUTComputePipeline = try device.makeComputePipelineState(function: transmittanceFunc)
             multiScatterLUTComputePipeline = try device.makeComputePipelineState(function: multiScatterFunc)
@@ -537,6 +572,27 @@ final class EarthRenderer: NSObject, MTKViewDelegate {
                 renderEncoder.setVertexBuffer(vertexBuffer.buffer, offset: vertexBuffer.offset, index: i)
             }
             for submesh in atmosphereMesh.submeshes {
+                renderEncoder.drawIndexedPrimitives(
+                    type: submesh.primitiveType,
+                    indexCount: submesh.indexCount,
+                    indexType: submesh.indexType,
+                    indexBuffer: submesh.indexBuffer.buffer,
+                    indexBufferOffset: submesh.indexBuffer.offset
+                )
+            }
+
+            // 3. Draw Outer Glow (soft ambient Fresnel halo, additive blending)
+            renderEncoder.setRenderPipelineState(outerGlowPipelineState)
+            renderEncoder.setDepthStencilState(atmosphereDepthState)
+            renderEncoder.setCullMode(.front)
+
+            renderEncoder.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
+            renderEncoder.setFragmentBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
+
+            for (i, vertexBuffer) in outerGlowMesh.vertexBuffers.enumerated() {
+                renderEncoder.setVertexBuffer(vertexBuffer.buffer, offset: vertexBuffer.offset, index: i)
+            }
+            for submesh in outerGlowMesh.submeshes {
                 renderEncoder.drawIndexedPrimitives(
                     type: submesh.primitiveType,
                     indexCount: submesh.indexCount,
