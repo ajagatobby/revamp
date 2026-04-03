@@ -29,7 +29,7 @@ struct KineticTextView: View {
     }
 
     var body: some View {
-        ZStack {
+        VStack(spacing: 2) {
             ForEach(wordStates) { word in
                 KineticWord(state: word)
             }
