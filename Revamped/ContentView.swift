@@ -75,11 +75,20 @@ struct ContentView: View {
 
     private var isInMap: Bool { transitionPhase == .map }
 
-    // Transition progress: 0 = globe, 1 = map
-    private var globeVisible: Bool { transitionPhase == .globe || transitionPhase == .zoomingIn }
-    private var globeScale: CGFloat { transitionPhase == .zoomingIn ? 2.0 : (transitionPhase == .zoomingOut ? 0.5 : 1.0) }
-    private var globeAlpha: Double { transitionPhase == .globe ? 1.0 : (transitionPhase == .zoomingIn ? 0.0 : 0.0) }
-    private var mapAlpha: Double { (transitionPhase == .map || transitionPhase == .zoomingIn) ? 1.0 : 0.0 }
+    // Transition computed properties
+    private var globeScale: CGFloat {
+        switch transitionPhase {
+        case .zoomingIn: return 1.5
+        case .zoomingOut: return 0.7
+        default: return 1.0
+        }
+    }
+    private var globeAlpha: Double {
+        transitionPhase == .globe || transitionPhase == .zoomingOut ? 1.0 : 0.0
+    }
+    private var mapAlpha: Double {
+        transitionPhase == .map || transitionPhase == .zoomingIn ? 1.0 : 0.0
+    }
 
     var body: some View {
         ZStack {
@@ -149,25 +158,28 @@ struct ContentView: View {
     }
 
     private func triggerTransitionToMap() {
-        // Single smooth animation — globe scales up + fades, map fades in simultaneously
-        withAnimation(.easeInOut(duration: 0.8)) {
-            transitionPhase = .zoomingIn
-        }
-        // Settle into map mode
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) {
-            withAnimation(.easeOut(duration: 0.3)) {
-                transitionPhase = .map
+        // Wait 0.3s before starting transition
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            // Globe fades out + scales up slowly while map fades in
+            withAnimation(.easeInOut(duration: 1.2)) {
+                transitionPhase = .zoomingIn
+            }
+            // Settle into map mode after crossfade completes
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.1) {
+                withAnimation(.easeOut(duration: 0.4)) {
+                    transitionPhase = .map
+                }
             }
         }
     }
 
     private func triggerTransitionToGlobe() {
         hasAutoTriggered = false
-        withAnimation(.easeInOut(duration: 0.8)) {
+        withAnimation(.easeInOut(duration: 1.0)) {
             transitionPhase = .zoomingOut
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) {
-            withAnimation(.easeOut(duration: 0.3)) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
+            withAnimation(.easeOut(duration: 0.4)) {
                 transitionPhase = .globe
                 zoom = 2.0
             }
