@@ -138,6 +138,7 @@ struct ContentView: View {
 
         }
         .onAppear {
+            SoundEngine.shared.startAmbient()
             startAutoSequence()
         }
         .onChange(of: zoom) { _, newZoom in

@@ -96,6 +96,83 @@ final class SoundEngine {
         playHaptic(intensity: 0.3, sharpness: 0.1, duration: 0.3)
     }
 
+    // MARK: - Ambient Background Pad
+
+    private var ambientNode: AVAudioSourceNode?
+    private var ambientVolume: Float = 0
+
+    /// Start a continuous ambient drone — warm evolving pad
+    func startAmbient() {
+        guard let engine = audioEngine, ambientNode == nil else { return }
+
+        let sampleRate = Float(engine.outputNode.outputFormat(forBus: 0).sampleRate)
+        guard sampleRate > 0 else { return }
+
+        // Chord: C3(130.81) + E3(164.81) + G3(196.00) + C4(261.63)
+        let baseFreqs: [Float] = [130.81, 164.81, 196.00, 261.63]
+        var phases = [Float](repeating: 0, count: baseFreqs.count)
+        var lfoPhase: Float = 0
+        let targetVolume: Float = 0.035 // Very quiet background
+        var fadeIn: Float = 0
+
+        let node = AVAudioSourceNode { [weak self] _, _, frameCount, audioBufferList -> OSStatus in
+            let buffers = UnsafeMutableAudioBufferListPointer(audioBufferList)
+            guard let buf = buffers.first?.mData?.assumingMemoryBound(to: Float.self) else {
+                return noErr
+            }
+
+            let vol = self?.ambientVolume ?? 0
+
+            for frame in 0..<Int(frameCount) {
+                // Slow fade in
+                fadeIn = min(fadeIn + 0.00001, 1.0)
+
+                // LFO for gentle movement (0.05 Hz = 20 second cycle)
+                lfoPhase += 0.05 / sampleRate
+                if lfoPhase > 1 { lfoPhase -= 1 }
+                let lfo = sin(lfoPhase * 2 * .pi)
+
+                // Sum chord tones with slight detuning from LFO
+                var sample: Float = 0
+                for i in 0..<baseFreqs.count {
+                    let detune: Float = 1.0 + lfo * 0.002 * Float(i) // Slight chorus
+                    let freq = baseFreqs[i] * detune
+                    phases[i] += freq / sampleRate
+                    if phases[i] > 1 { phases[i] -= 1 }
+                    sample += sin(phases[i] * 2 * .pi)
+                }
+
+                // Normalize, apply volume + fade
+                sample = sample / Float(baseFreqs.count) * vol * fadeIn
+
+                buf[frame] = sample
+            }
+            return noErr
+        }
+
+        engine.attach(node)
+        engine.connect(node, to: engine.mainMixerNode,
+                       format: engine.outputNode.outputFormat(forBus: 0))
+
+        do {
+            if !engine.isRunning { try engine.start() }
+        } catch { return }
+
+        ambientNode = node
+        ambientVolume = targetVolume
+    }
+
+    /// Fade out and stop ambient
+    func stopAmbient() {
+        ambientVolume = 0
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            if let node = self?.ambientNode {
+                self?.audioEngine?.detach(node)
+                self?.ambientNode = nil
+            }
+        }
+    }
+
     // MARK: - Synth Engine
 
     private enum Waveform { case sine, noise }
