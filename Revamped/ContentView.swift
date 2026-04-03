@@ -63,6 +63,10 @@ struct ContentView: View {
         case zoomingOut  // Map fading → globe returns
     }
 
+    private var mapVisible: Bool {
+        transitionPhase == .map
+    }
+
     private var mapCameraDistance: Double {
         let t = Double((zoom - 1.5) / (2.0 - 1.5))
         let clamped = min(max(t, 0), 1)
@@ -78,7 +82,17 @@ struct ContentView: View {
         ZStack {
             Color.black.ignoresSafeArea()
 
-            // --- Globe layer ---
+            // --- Map layer (always mounted for preloading, hidden behind globe) ---
+            NYCMapView(
+                cameraDistance: mapCameraDistance,
+                cameraPitch: mapCameraPitch
+            )
+            .ignoresSafeArea()
+            .opacity(mapVisible ? 1 : 0)
+            .scaleEffect(transitionPhase == .zoomingOut ? 0.8 : 1.0)
+            .allowsHitTesting(transitionPhase == .map)
+
+            // --- Globe layer (on top of map) ---
             if transitionPhase != .map {
                 MetalGlobeView(activeTextureIndex: $activeTextureIndex, zoom: $zoom)
                     .ignoresSafeArea()
@@ -86,18 +100,6 @@ struct ContentView: View {
                     .blur(radius: transitionPhase == .zoomingIn ? 30 : 0)
                     .opacity(transitionPhase == .zoomingIn ? 0 : 1)
                     .allowsHitTesting(transitionPhase == .globe)
-            }
-
-            // --- Map layer ---
-            if transitionPhase == .map || transitionPhase == .zoomingOut {
-                NYCMapView(
-                    cameraDistance: mapCameraDistance,
-                    cameraPitch: mapCameraPitch
-                )
-                .ignoresSafeArea()
-                .opacity(transitionPhase == .zoomingOut ? 0 : 1)
-                .scaleEffect(transitionPhase == .zoomingOut ? 0.8 : 1.0)
-                .allowsHitTesting(transitionPhase == .map)
             }
 
             // --- White flash overlay ---
