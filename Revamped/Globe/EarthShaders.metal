@@ -476,6 +476,56 @@ fragment float4 atmosphereFragmentShader(
     return float4(atmosphere, alpha);
 }
 
+// MARK: - Fresnel Glow Fragment Shader
+//
+// Algorithm:
+// 1. Compute sunlight mask (mixAmount) from dot(sunDir, normal)
+// 2. Create base atmosphere color, apply mask
+// 3. Compute Fresnel from dot(cameraToSurface, normal) — edges become opaque
+// 4. Multiply Fresnel by mixAmount so glow fades on night side
+
+fragment float4 fresnelGlowFragmentShader(
+    VertexOut in [[stage_in]],
+    constant Uniforms &uniforms [[buffer(1)]]
+) {
+    // Surface normal in world space (used as camera-coordinate proxy)
+    float3 N = normalize(in.worldNormal);
+    float3 L = normalize(uniforms.sunDirection);
+    float3 V = normalize(uniforms.cameraPosition - in.worldPosition);
+
+    // --- Step 1: Sunlight Masking (Day/Night) ---
+    // Cosine of angle between sun direction and surface normal
+    float cosAngleSunToNormal = dot(N, L);
+    // mixAmount: 1 on full day side, 0 on full night side, smooth transition
+    float mixAmount = saturate(cosAngleSunToNormal * 2.0 + 0.5);
+    mixAmount = pow(mixAmount, 1.5);
+
+    // --- Step 2: Base Atmosphere Color ---
+    // Blue atmosphere color, masked by day/night
+    float3 u_color = float3(0.3, 0.6, 1.0);
+    float3 baseAtmosphere = u_color * mixAmount;
+
+    // --- Step 3: Fresnel Effect (Edge Glow) ---
+    // Angle between camera-to-surface vector and surface normal
+    // At center: dot(V, N) ≈ 1 → fresnel ≈ 0 (transparent)
+    // At edges: dot(V, N) ≈ 0 → fresnel ≈ 1 (opaque/glowing)
+    float fresnelTerm = 1.0 - max(dot(V, N), 0.0);
+    fresnelTerm = pow(fresnelTerm, 2.0);
+
+    // --- Step 4: Final Masking ---
+    // Multiply Fresnel by mixAmount so edge glow fades on night side
+    float3 glowColor = u_color * fresnelTerm * mixAmount;
+
+    // Combine base atmosphere and Fresnel glow
+    float3 finalColor = baseAtmosphere * fresnelTerm * 0.5 + glowColor * 0.8;
+
+    // Alpha: driven by Fresnel (edges opaque, center transparent)
+    // Also masked by day/night
+    float alpha = fresnelTerm * mixAmount * 0.9;
+
+    return float4(finalColor, alpha);
+}
+
 // MARK: - Preview Fragment Shader
 
 fragment float4 previewFragmentShader(
