@@ -101,6 +101,8 @@ final class EarthRenderer: NSObject, MTKViewDelegate {
         mtkView.clearColor = MTLClearColor(red: 0.0, green: 0.0, blue: 0.02, alpha: 1.0)
         mtkView.delegate = self
         mtkView.preferredFramesPerSecond = 60
+        mtkView.contentScaleFactor = UIScreen.main.scale // Retina resolution
+        mtkView.autoResizeDrawable = true
 
         setupVertexDescriptor()
         buildMeshes()
@@ -170,11 +172,11 @@ final class EarthRenderer: NSObject, MTKViewDelegate {
             MDLVertexBufferLayout(stride: 56)
         ])
 
-        // Earth sphere
+        // Earth sphere (high resolution for HD)
         let earthMDL = MDLMesh.newEllipsoid(
             withRadii: SIMD3<Float>(repeating: planetRadius),
-            radialSegments: 80,
-            verticalSegments: 60,
+            radialSegments: 128,
+            verticalSegments: 96,
             geometryType: .triangles,
             inwardNormals: false,
             hemisphere: false,
@@ -494,9 +496,9 @@ final class EarthRenderer: NSObject, MTKViewDelegate {
         // Normal matrix (transpose of inverse of model matrix upper-left 3x3)
         let normalMatrix = modelMatrix.inverse.transpose
 
-        // Sun direction (slowly orbiting)
-        let sunAngle = time * 0.02
-        let sunDir = normalize(SIMD3<Float>(cos(sunAngle), 0.3, sin(sunAngle)))
+        // Sun direction (very slow orbit, always mostly frontal so globe stays lit)
+        let sunAngle = time * 0.005
+        let sunDir = normalize(SIMD3<Float>(cos(sunAngle) * 0.5, 0.3, 0.8 + sin(sunAngle) * 0.2))
 
         var uniforms = Uniforms(
             modelMatrix: modelMatrix,

@@ -299,7 +299,7 @@ fragment float4 earthFragmentShader(
 
     float4 dayColor = dayTexture.sample(texSampler, uv);
     float4 nightColor = nightTexture.sample(texSampler, uv);
-    float3 surfaceColor = mix(nightColor.rgb, dayColor.rgb * (diffuse + 0.06), dayWeight);
+    float3 surfaceColor = mix(nightColor.rgb, dayColor.rgb * (diffuse + 0.12), dayWeight);
 
     // Specular: reflect(-L, N) dot V for ocean glare
     float specMask = specularMap.sample(texSampler, uv).r;
