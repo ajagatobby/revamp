@@ -58,7 +58,7 @@ struct ContentView: View {
             // --- Globe layer ---
             MetalGlobeView(activeTextureIndex: $activeTextureIndex, zoom: $zoom)
                 .ignoresSafeArea()
-                .scaleEffect(transitionPhase == .zoomingIn ? 1.5 : 1.0)
+                .scaleEffect(transitionPhase == .zoomingIn ? 1.5 : 0.65)
                 .opacity(transitionPhase == .welcome ? 1.0 : 0.0)
                 .allowsHitTesting(false)
 
@@ -66,13 +66,13 @@ struct ContentView: View {
             if transitionPhase == .welcome {
                 VStack(spacing: 0) {
                     // Title
-                    VStack(spacing: -12) {
+                    VStack(spacing: -18) {
                         Text("Planet")
-                            .font(.custom("BricolageGrotesque72pt-ExtraBold", size: 72))
+                            .font(.custom("BricolageGrotesque72pt-ExtraBold", size: 96))
                             .foregroundStyle(.white)
 
                         Text("Earth")
-                            .font(.custom("BricolageGrotesque72pt-ExtraBold", size: 72))
+                            .font(.custom("BricolageGrotesque72pt-ExtraBold", size: 96))
                             .foregroundStyle(Color(red: 0.35, green: 0.5, blue: 1.0))
                     }
                     .opacity(showTitle ? 1 : 0)
