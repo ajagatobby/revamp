@@ -1,10 +1,7 @@
 import AVFoundation
 import CoreHaptics
-import UIKit
 
 // MARK: - Synthesized UI Sound Engine
-// Generates satisfying sounds programmatically — no audio files needed.
-// Combines sine/noise oscillators with CoreHaptics for premium feel.
 
 final class SoundEngine {
     static let shared = SoundEngine()
@@ -12,6 +9,8 @@ final class SoundEngine {
     private var audioEngine: AVAudioEngine?
     private var hapticEngine: CHHapticEngine?
     private let hapticSupported: Bool
+    private var isAudioReady = false
+    private var mixerFormat: AVAudioFormat?
 
     private init() {
         hapticSupported = CHHapticEngine.capabilitiesForHardware().supportsHaptics
@@ -22,12 +21,22 @@ final class SoundEngine {
     // MARK: - Setup
 
     private func setupAudio() {
-        let engine = AVAudioEngine()
         do {
             try AVAudioSession.sharedInstance().setCategory(.ambient, mode: .default, options: .mixWithOthers)
             try AVAudioSession.sharedInstance().setActive(true)
-        } catch {}
-        audioEngine = engine
+
+            let engine = AVAudioEngine()
+            // Get the mixer format — this is what we must match
+            let format = engine.mainMixerNode.outputFormat(forBus: 0)
+            guard format.sampleRate > 0 && format.channelCount > 0 else { return }
+
+            mixerFormat = format
+            audioEngine = engine
+            try engine.start()
+            isAudioReady = true
+        } catch {
+            isAudioReady = false
+        }
     }
 
     private func setupHaptics() {
@@ -43,222 +52,182 @@ final class SoundEngine {
         } catch {}
     }
 
-    // MARK: - Sound: Whoosh (for transitions)
-    // Filtered noise sweep — 150ms, frequency drops from high to low
+    // MARK: - Sounds
 
     func playWhoosh() {
-        playSynth(frequency: 800, endFrequency: 200, duration: 0.18, amplitude: 0.12, waveform: .noise)
-        playHaptic(intensity: 0.4, sharpness: 0.3, duration: 0.15)
+        playSynth(freq: 800, endFreq: 200, dur: 0.18, amp: 0.12, noise: true)
+        playHaptic(intensity: 0.4, sharpness: 0.3)
     }
-
-    // MARK: - Sound: Pop (for text appearing)
-    // Short sine burst — 80ms, bright and snappy
 
     func playPop() {
-        playSynth(frequency: 1200, endFrequency: 900, duration: 0.08, amplitude: 0.15, waveform: .sine)
-        playHaptic(intensity: 0.5, sharpness: 0.8, duration: 0.05)
+        playSynth(freq: 1200, endFreq: 900, dur: 0.08, amp: 0.15, noise: false)
+        playHaptic(intensity: 0.5, sharpness: 0.8)
     }
-
-    // MARK: - Sound: Soft Ding (for arrival/completion)
-    // Two-tone sine — 200ms, harmonic and warm
 
     func playDing() {
-        playSynth(frequency: 880, endFrequency: 880, duration: 0.2, amplitude: 0.12, waveform: .sine)
+        playSynth(freq: 880, endFreq: 880, dur: 0.2, amp: 0.12, noise: false)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
-            self.playSynth(frequency: 1320, endFrequency: 1320, duration: 0.15, amplitude: 0.08, waveform: .sine)
+            self.playSynth(freq: 1320, endFreq: 1320, dur: 0.15, amp: 0.08, noise: false)
         }
-        playHaptic(intensity: 0.6, sharpness: 0.5, duration: 0.2)
+        playHaptic(intensity: 0.6, sharpness: 0.5)
     }
-
-    // MARK: - Sound: Swoosh (for globe zoom)
-    // Rising tone — 250ms, builds energy
 
     func playSwoosh() {
-        playSynth(frequency: 300, endFrequency: 900, duration: 0.25, amplitude: 0.1, waveform: .sine)
-        playHaptic(intensity: 0.3, sharpness: 0.2, duration: 0.2)
+        playSynth(freq: 300, endFreq: 900, dur: 0.25, amp: 0.1, noise: false)
+        playHaptic(intensity: 0.3, sharpness: 0.2)
     }
-
-    // MARK: - Sound: Impact (for map landing)
-    // Low thud + bright click — 120ms
 
     func playImpact() {
-        playSynth(frequency: 120, endFrequency: 60, duration: 0.12, amplitude: 0.2, waveform: .sine)
-        playSynth(frequency: 2000, endFrequency: 1500, duration: 0.04, amplitude: 0.08, waveform: .sine)
-        playHaptic(intensity: 0.8, sharpness: 0.6, duration: 0.1)
+        playSynth(freq: 120, endFreq: 60, dur: 0.12, amp: 0.2, noise: false)
+        playSynth(freq: 2000, endFreq: 1500, dur: 0.04, amp: 0.08, noise: false)
+        playHaptic(intensity: 0.8, sharpness: 0.6)
     }
-
-    // MARK: - Sound: Gradient reveal
-    // Soft pad — 400ms, warm and ambient
 
     func playReveal() {
-        playSynth(frequency: 440, endFrequency: 520, duration: 0.4, amplitude: 0.06, waveform: .sine)
-        playSynth(frequency: 660, endFrequency: 780, duration: 0.35, amplitude: 0.04, waveform: .sine)
-        playHaptic(intensity: 0.3, sharpness: 0.1, duration: 0.3)
+        playSynth(freq: 440, endFreq: 520, dur: 0.4, amp: 0.06, noise: false)
+        playSynth(freq: 660, endFreq: 780, dur: 0.35, amp: 0.04, noise: false)
+        playHaptic(intensity: 0.3, sharpness: 0.1)
     }
 
-    // MARK: - Ambient Background Pad
+    // MARK: - Ambient Background
 
     private var ambientNode: AVAudioSourceNode?
     private var ambientVolume: Float = 0
 
-    /// Start a continuous ambient drone — warm evolving pad
     func startAmbient() {
-        guard let engine = audioEngine, ambientNode == nil else { return }
+        guard isAudioReady, let engine = audioEngine, let format = mixerFormat,
+              ambientNode == nil else { return }
 
-        let sampleRate = Float(engine.outputNode.outputFormat(forBus: 0).sampleRate)
-        guard sampleRate > 0 else { return }
+        let sr = Float(format.sampleRate)
+        guard sr > 0 else { return }
 
-        // Chord: C3(130.81) + E3(164.81) + G3(196.00) + C4(261.63)
-        let baseFreqs: [Float] = [130.81, 164.81, 196.00, 261.63]
-        var phases = [Float](repeating: 0, count: baseFreqs.count)
+        let freqs: [Float] = [130.81, 164.81, 196.00, 261.63]
+        var phases = [Float](repeating: 0, count: freqs.count)
         var lfoPhase: Float = 0
-        let targetVolume: Float = 0.035 // Very quiet background
         var fadeIn: Float = 0
 
-        let node = AVAudioSourceNode { [weak self] _, _, frameCount, audioBufferList -> OSStatus in
+        let node = AVAudioSourceNode(format: format) { [weak self] _, _, frameCount, audioBufferList -> OSStatus in
             let buffers = UnsafeMutableAudioBufferListPointer(audioBufferList)
-            guard let buf = buffers.first?.mData?.assumingMemoryBound(to: Float.self) else {
-                return noErr
-            }
-
             let vol = self?.ambientVolume ?? 0
+            let chCount = Int(format.channelCount)
 
             for frame in 0..<Int(frameCount) {
-                // Slow fade in
                 fadeIn = min(fadeIn + 0.00001, 1.0)
-
-                // LFO for gentle movement (0.05 Hz = 20 second cycle)
-                lfoPhase += 0.05 / sampleRate
+                lfoPhase += 0.05 / sr
                 if lfoPhase > 1 { lfoPhase -= 1 }
                 let lfo = sin(lfoPhase * 2 * .pi)
 
-                // Sum chord tones with slight detuning from LFO
                 var sample: Float = 0
-                for i in 0..<baseFreqs.count {
-                    let detune: Float = 1.0 + lfo * 0.002 * Float(i) // Slight chorus
-                    let freq = baseFreqs[i] * detune
-                    phases[i] += freq / sampleRate
+                for i in 0..<freqs.count {
+                    let f = freqs[i] * (1.0 + lfo * 0.002 * Float(i))
+                    phases[i] += f / sr
                     if phases[i] > 1 { phases[i] -= 1 }
                     sample += sin(phases[i] * 2 * .pi)
                 }
+                sample = sample / Float(freqs.count) * vol * fadeIn
 
-                // Normalize, apply volume + fade
-                sample = sample / Float(baseFreqs.count) * vol * fadeIn
-
-                buf[frame] = sample
+                for ch in 0..<chCount {
+                    if let buf = buffers[ch].mData?.assumingMemoryBound(to: Float.self) {
+                        buf[frame] = sample
+                    }
+                }
             }
             return noErr
         }
 
         engine.attach(node)
-        engine.connect(node, to: engine.mainMixerNode,
-                       format: engine.outputNode.outputFormat(forBus: 0))
+        engine.connect(node, to: engine.mainMixerNode, format: format)
 
-        do {
-            if !engine.isRunning { try engine.start() }
-        } catch { return }
+        if !engine.isRunning {
+            do { try engine.start() } catch { return }
+        }
 
         ambientNode = node
-        ambientVolume = targetVolume
+        ambientVolume = 0.035
     }
 
-    /// Fade out and stop ambient
     func stopAmbient() {
         ambientVolume = 0
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-            if let node = self?.ambientNode {
-                self?.audioEngine?.detach(node)
-                self?.ambientNode = nil
-            }
+            guard let self, let node = self.ambientNode else { return }
+            self.audioEngine?.detach(node)
+            self.ambientNode = nil
         }
     }
 
-    // MARK: - Synth Engine
+    // MARK: - Synth Core
 
-    private enum Waveform { case sine, noise }
+    private func playSynth(freq: Float, endFreq: Float, dur: Double, amp: Float, noise: Bool) {
+        guard isAudioReady, let engine = audioEngine, let format = mixerFormat else { return }
 
-    private func playSynth(frequency: Float, endFrequency: Float, duration: Double,
-                            amplitude: Float, waveform: Waveform) {
-        guard let engine = audioEngine else { return }
+        let sr = Float(format.sampleRate)
+        guard sr > 0 else { return }
 
-        let sampleRate = Float(engine.outputNode.outputFormat(forBus: 0).sampleRate)
-        guard sampleRate > 0 else { return }
-
+        let totalSamples = Int(Double(sr) * dur)
         var phase: Float = 0
-        let totalSamples = Int(Double(sampleRate) * duration)
         var currentSample = 0
+        let chCount = Int(format.channelCount)
 
-        let sourceNode = AVAudioSourceNode { _, _, frameCount, audioBufferList -> OSStatus in
+        let node = AVAudioSourceNode(format: format) { _, _, frameCount, audioBufferList -> OSStatus in
             let buffers = UnsafeMutableAudioBufferListPointer(audioBufferList)
+
             for frame in 0..<Int(frameCount) {
-                guard currentSample < totalSamples else {
-                    if let buf = buffers.first?.mData?.assumingMemoryBound(to: Float.self) {
-                        buf[frame] = 0
-                    }
-                    continue
-                }
-
-                let progress = Float(currentSample) / Float(totalSamples)
-                let freq = frequency + (endFrequency - frequency) * progress
-
-                // Exponential amplitude envelope: sharp attack, smooth decay
-                let envelope = amplitude * (1.0 - progress) * (1.0 - progress)
-
                 let sample: Float
-                switch waveform {
-                case .sine:
-                    sample = sin(phase * 2.0 * .pi) * envelope
-                case .noise:
-                    let noise = Float.random(in: -1...1)
-                    let sine = sin(phase * 2.0 * .pi)
-                    sample = (noise * 0.3 + sine * 0.7) * envelope
+                if currentSample < totalSamples {
+                    let progress = Float(currentSample) / Float(totalSamples)
+                    let f = freq + (endFreq - freq) * progress
+                    let envelope = amp * (1.0 - progress) * (1.0 - progress)
+
+                    if noise {
+                        let n = Float.random(in: -1...1)
+                        sample = (n * 0.3 + sin(phase * 2 * .pi) * 0.7) * envelope
+                    } else {
+                        sample = sin(phase * 2 * .pi) * envelope
+                    }
+
+                    phase += f / sr
+                    if phase > 1 { phase -= 1 }
+                    currentSample += 1
+                } else {
+                    sample = 0
                 }
 
-                phase += freq / sampleRate
-                if phase > 1.0 { phase -= 1.0 }
-
-                if let buf = buffers.first?.mData?.assumingMemoryBound(to: Float.self) {
-                    buf[frame] = sample
+                for ch in 0..<chCount {
+                    if let buf = buffers[ch].mData?.assumingMemoryBound(to: Float.self) {
+                        buf[frame] = sample
+                    }
                 }
-                currentSample += 1
             }
             return noErr
         }
 
-        engine.attach(sourceNode)
-        engine.connect(sourceNode, to: engine.mainMixerNode,
-                       format: engine.outputNode.outputFormat(forBus: 0))
+        engine.attach(node)
+        engine.connect(node, to: engine.mainMixerNode, format: format)
 
-        do {
-            if !engine.isRunning {
-                try engine.start()
-            }
-        } catch { return }
+        if !engine.isRunning {
+            do { try engine.start() } catch { return }
+        }
 
-        // Auto-detach after sound completes
-        DispatchQueue.main.asyncAfter(deadline: .now() + duration + 0.1) { [weak engine] in
-            engine?.detach(sourceNode)
+        DispatchQueue.main.asyncAfter(deadline: .now() + dur + 0.1) { [weak engine] in
+            engine?.detach(node)
         }
     }
 
     // MARK: - Haptics
 
-    private func playHaptic(intensity: Float, sharpness: Float, duration: Double) {
+    private func playHaptic(intensity: Float, sharpness: Float) {
         guard hapticSupported, let engine = hapticEngine else { return }
 
-        let event = CHHapticEvent(
-            eventType: .hapticTransient,
-            parameters: [
-                CHHapticEventParameter(parameterID: .hapticIntensity, value: intensity),
-                CHHapticEventParameter(parameterID: .hapticSharpness, value: sharpness),
-            ],
-            relativeTime: 0,
-            duration: duration
-        )
-
         do {
-            let pattern = try CHHapticPattern(events: [event], parameters: [])
-            let player = try engine.makePlayer(with: pattern)
+            let event = CHHapticEvent(
+                eventType: .hapticTransient,
+                parameters: [
+                    CHHapticEventParameter(parameterID: .hapticIntensity, value: intensity),
+                    CHHapticEventParameter(parameterID: .hapticSharpness, value: sharpness),
+                ],
+                relativeTime: 0
+            )
+            let player = try engine.makePlayer(with: try CHHapticPattern(events: [event], parameters: []))
             try player.start(atTime: CHHapticTimeImmediate)
         } catch {}
     }
