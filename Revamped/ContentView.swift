@@ -52,69 +52,147 @@ struct ContentView: View {
     private let minZoom: Float = 1.5
     private let maxZoom: Float = 8.0
 
-    // Globe-to-map transition zone
-    private let transitionStart: Float = 2.2 // Globe starts fading
-    private let transitionEnd: Float = 1.8   // Globe fully gone, map visible
+    // Globe vs map mode
+    @State private var showingMap = false
+    @State private var transitionPhase: TransitionPhase = .globe
 
-    // 0.0 = full globe, 1.0 = full map
-    private var transitionProgress: Double {
-        let clamped = min(max(zoom, transitionEnd), transitionStart)
-        return Double((transitionStart - clamped) / (transitionStart - transitionEnd))
+    enum TransitionPhase {
+        case globe       // Normal globe view
+        case zoomingIn   // Globe scaling up + blur → white flash
+        case map         // 3D NYC map visible
+        case zoomingOut  // Map fading → globe returns
     }
 
-    private var globeOpacity: Double { 1.0 - transitionProgress }
-    private var mapOpacity: Double { transitionProgress }
-    private var isMapDominant: Bool { transitionProgress > 0.5 }
-
-    // Map camera: exponential distance mapping
     private var mapCameraDistance: Double {
-        let t = Double((zoom - 1.5) / (2.2 - 1.5))
+        let t = Double((zoom - 1.5) / (2.0 - 1.5))
         let clamped = min(max(t, 0), 1)
-        return 1200.0 * pow(50000.0 / 1200.0, clamped)
+        return 800.0 * pow(30000.0 / 800.0, clamped)
     }
 
     private var mapCameraPitch: Double {
-        let t = Double((zoom - 1.5) / (2.2 - 1.5))
-        return 60.0 * (1.0 - min(max(t, 0), 1))
+        let t = Double((zoom - 1.5) / (2.0 - 1.5))
+        return 65.0 * (1.0 - min(max(t, 0), 1))
     }
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
 
-            // Metal globe layer
-            MetalGlobeView(activeTextureIndex: $activeTextureIndex, zoom: $zoom)
-                .ignoresSafeArea()
-                .opacity(globeOpacity)
-                .allowsHitTesting(!isMapDominant)
+            // --- Globe layer ---
+            if transitionPhase != .map {
+                MetalGlobeView(activeTextureIndex: $activeTextureIndex, zoom: $zoom)
+                    .ignoresSafeArea()
+                    .scaleEffect(transitionPhase == .zoomingIn ? 3.0 : 1.0)
+                    .blur(radius: transitionPhase == .zoomingIn ? 30 : 0)
+                    .opacity(transitionPhase == .zoomingIn ? 0 : 1)
+                    .allowsHitTesting(transitionPhase == .globe)
+            }
 
-            // MapKit 3D NYC layer (loads slightly early for tile preloading)
-            if zoom < transitionStart + 0.2 {
+            // --- Map layer ---
+            if transitionPhase == .map || transitionPhase == .zoomingOut {
                 NYCMapView(
                     cameraDistance: mapCameraDistance,
                     cameraPitch: mapCameraPitch
                 )
                 .ignoresSafeArea()
-                .opacity(mapOpacity)
-                .allowsHitTesting(isMapDominant)
+                .opacity(transitionPhase == .zoomingOut ? 0 : 1)
+                .scaleEffect(transitionPhase == .zoomingOut ? 0.8 : 1.0)
+                .allowsHitTesting(transitionPhase == .map)
             }
 
-            // Zoom — left
+            // --- White flash overlay ---
+            Color.white
+                .ignoresSafeArea()
+                .opacity(transitionPhase == .zoomingIn ? 0.6 : 0)
+                .allowsHitTesting(false)
+
+            // --- Controls ---
             zoomControls
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                 .padding(.leading, 16)
 
-            // Textures — right (fade out in map mode)
             textureSelector
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
                 .padding(.trailing, 14)
-                .opacity(1.0 - transitionProgress)
-                .allowsHitTesting(!isMapDominant)
+                .opacity(transitionPhase == .map ? 0 : 1)
+                .allowsHitTesting(transitionPhase == .globe)
 
-            // Tag — bottom
             activeTag
                 .frame(maxHeight: .infinity, alignment: .bottom)
                 .padding(.bottom, 44)
+
+            // --- Explore NYC button (appears at close zoom) ---
+            if transitionPhase == .globe && zoom < 2.0 {
+                Button {
+                    triggerTransitionToMap()
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "building.2.fill")
+                            .font(.system(size: 13))
+                        Text("Explore NYC")
+                            .font(.system(size: 13, weight: .semibold))
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .background(Color.blue, in: Capsule())
+                }
+                .transition(.scale.combined(with: .opacity))
+                .frame(maxHeight: .infinity, alignment: .bottom)
+                .padding(.bottom, 90)
+            }
+
+            // --- Back button in map mode ---
+            if transitionPhase == .map {
+                Button {
+                    triggerTransitionToGlobe()
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "globe")
+                            .font(.system(size: 13))
+                        Text("Back to Globe")
+                            .font(.system(size: 13, weight: .semibold))
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .background(Color.white.opacity(0.15), in: Capsule())
+                }
+                .transition(.scale.combined(with: .opacity))
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .padding(.top, 60)
+                .padding(.leading, 16)
+            }
+        }
+        .animation(.easeInOut(duration: 0.15), value: zoom < 2.0)
+        .animation(.spring(response: 0.5, dampingFraction: 0.85), value: transitionPhase == .map)
+    }
+
+    private func triggerTransitionToMap() {
+        // Phase 1: Globe zooms in with blur + flash
+        withAnimation(.easeIn(duration: 0.5)) {
+            transitionPhase = .zoomingIn
+        }
+        // Phase 2: Switch to map after flash
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+            withAnimation(.easeOut(duration: 0.6)) {
+                transitionPhase = .map
+                zoom = 1.6
+            }
+        }
+    }
+
+    private func triggerTransitionToGlobe() {
+        // Phase 1: Map fades + shrinks
+        withAnimation(.easeIn(duration: 0.4)) {
+            transitionPhase = .zoomingOut
+        }
+        // Phase 2: Return to globe
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            withAnimation(.easeOut(duration: 0.5)) {
+                transitionPhase = .globe
+                zoom = 3.0
+            }
         }
     }
 
