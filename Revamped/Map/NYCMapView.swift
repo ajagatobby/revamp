@@ -89,9 +89,7 @@ private struct LiveMapView: UIViewRepresentable {
             self.onTilesLoaded = onTilesLoaded
         }
 
-        deinit {
-            displayLink?.invalidate()
-        }
+        deinit {}
 
         // Detect when tiles finish loading
         func mapViewDidFinishRenderingMap(_ mapView: MKMapView, fullyRendered: Bool) {
@@ -112,83 +110,85 @@ private struct LiveMapView: UIViewRepresentable {
         private func startJourney() {
             guard let mapView else { return }
 
-            // Camera is already at Cozy Hotel (set in makeUIView).
-            // Chain each phase off the previous completion — no overlaps, no gaps.
+            // Use MapKit's native flyTo for each waypoint — its internal
+            // camera animator is the smoothest option on iOS.
+            let waypoints: [(CLLocationCoordinate2D, Double, Double, Double, TimeInterval)] = [
+                // (coordinate, distance, pitch, heading, duration)
+                // Phase 1: Orbit at Cozy Hotel
+                (NYCMapView.cozyHotel, 500, 60, 240, 3.0),
+                // Phase 2: Pull up, head south
+                (CLLocationCoordinate2D(latitude: 40.7796, longitude: -73.9648), 2500, 50, 210, 5.0),
+                // Phase 3: Arrive Times Square
+                (NYCMapView.timesSquare, 500, 70, 45, 5.0),
+            ]
 
-            // Phase 1: Orbit Cozy Hotel (ease-in start)
-            UIView.animate(withDuration: 3.0, delay: 0.1, options: .curveEaseIn, animations: {
-                mapView.camera = MKMapCamera(
-                    lookingAtCenter: NYCMapView.cozyHotel,
-                    fromDistance: 500, pitch: 60, heading: 240
-                )
+            flyToWaypoint(index: 0, waypoints: waypoints, mapView: mapView)
+        }
+
+        private func flyToWaypoint(index: Int,
+                                    waypoints: [(CLLocationCoordinate2D, Double, Double, Double, TimeInterval)],
+                                    mapView: MKMapView) {
+            guard index < waypoints.count else {
+                // Journey complete — start orbit
+                startOrbit(mapView: mapView)
+                return
+            }
+
+            let (coord, dist, pitch, heading, duration) = waypoints[index]
+            let camera = MKMapCamera(
+                lookingAtCenter: coord,
+                fromDistance: dist,
+                pitch: pitch,
+                heading: heading
+            )
+
+            // MapKit's native animated camera transition — smoothest possible
+            UIView.animate(withDuration: duration, delay: 0,
+                           options: [.curveLinear, .allowAnimatedContent],
+                           animations: {
+                mapView.setCamera(camera, animated: false)
             }) { [weak self] _ in
-                guard let mapView = self?.mapView else { return }
-
-                // Phase 2: Pull up heading south (linear — no decel/accel stutter)
-                UIView.animate(withDuration: 5.0, delay: 0, options: .curveLinear, animations: {
-                    let mid = CLLocationCoordinate2D(
-                        latitude: (NYCMapView.cozyHotel.latitude + NYCMapView.timesSquare.latitude) / 2,
-                        longitude: (NYCMapView.cozyHotel.longitude + NYCMapView.timesSquare.longitude) / 2
-                    )
-                    mapView.camera = MKMapCamera(
-                        lookingAtCenter: mid,
-                        fromDistance: 2500, pitch: 50, heading: 210
-                    )
-                }) { [weak self] _ in
-                    guard let mapView = self?.mapView else { return }
-
-                    // Phase 3: Dive into Times Square (ease-out landing)
-                    UIView.animate(withDuration: 5.0, delay: 0, options: .curveEaseOut, animations: {
-                        mapView.camera = MKMapCamera(
-                            lookingAtCenter: NYCMapView.timesSquare,
-                            fromDistance: 500, pitch: 70, heading: 45
-                        )
-                    }) { [weak self] _ in
-                        // Phase 4: Continuous orbit
-                        self?.startOrbit(heading: 135)
-                    }
-                }
+                self?.flyToWaypoint(index: index + 1, waypoints: waypoints, mapView: mapView)
             }
         }
 
-        // MARK: - Smooth orbit via CADisplayLink (no animation handoff glitches)
+        // MARK: - Orbit using a single long animation (no per-frame updates)
 
-        private var displayLink: CADisplayLink?
-        private var orbitHeading: Double = 45
-        private let orbitSpeed: Double = 3.0 // degrees per second
-
-        private func startOrbit(heading: Double) {
-            orbitHeading = heading
-            stopOrbit()
-
-            let link = CADisplayLink(target: self, selector: #selector(orbitTick))
-            link.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 120, preferred: 60)
-            link.add(to: .main, forMode: .common)
-            displayLink = link
+        private func startOrbit(mapView: MKMapView) {
+            // Get current heading and animate a full 360° in one go
+            let currentHeading = mapView.camera.heading
+            orbitOnce(from: currentHeading, mapView: mapView)
         }
 
-        private func stopOrbit() {
-            displayLink?.invalidate()
-            displayLink = nil
-        }
-
-        @objc private func orbitTick(_ link: CADisplayLink) {
-            guard let mapView else { return }
-
-            let dt = link.targetTimestamp - link.timestamp
-            orbitHeading += orbitSpeed * dt
-
-            // Keep in 0-360 range
-            if orbitHeading >= 360 { orbitHeading -= 360 }
-
-            // Direct camera property set — no animation, no handoff, perfectly smooth
-            let camera = MKMapCamera(
+        private func orbitOnce(from heading: Double, mapView: MKMapView) {
+            // Animate 180° at a time (MapKit interpolates shortest path,
+            // so 360° would be a no-op). Two 180° segments = full rotation.
+            let halfwayHeading = heading + 180
+            let camera1 = MKMapCamera(
                 lookingAtCenter: NYCMapView.timesSquare,
-                fromDistance: 500,
-                pitch: 70,
-                heading: orbitHeading
+                fromDistance: 500, pitch: 70,
+                heading: halfwayHeading.truncatingRemainder(dividingBy: 360)
             )
-            mapView.camera = camera
+
+            UIView.animate(withDuration: 30, delay: 0,
+                           options: [.curveLinear, .allowAnimatedContent],
+                           animations: {
+                mapView.setCamera(camera1, animated: false)
+            }) { [weak self] _ in
+                let nextHeading = halfwayHeading + 180
+                let camera2 = MKMapCamera(
+                    lookingAtCenter: NYCMapView.timesSquare,
+                    fromDistance: 500, pitch: 70,
+                    heading: nextHeading.truncatingRemainder(dividingBy: 360)
+                )
+                UIView.animate(withDuration: 30, delay: 0,
+                               options: [.curveLinear, .allowAnimatedContent],
+                               animations: {
+                    mapView.setCamera(camera2, animated: false)
+                }) { [weak self] _ in
+                    self?.orbitOnce(from: nextHeading, mapView: mapView)
+                }
+            }
         }
     }
 }
