@@ -44,137 +44,94 @@ struct AtmosphereVertexOut {
 constant float PI = 3.14159265359;
 constant float INV_4PI = 1.0 / (4.0 * PI);
 
-// Rayleigh scattering coefficients at sea level (per unit distance, normalized)
-// Derived from beta_scat^R = (8*pi^3*(n^2-1)^2) / (3*N*lambda^4)
-// The 1/lambda^4 dependence causes blue light to scatter ~5.5x more than red
-constant float3 RAYLEIGH_COEFF = float3(5.802e-3, 13.558e-3, 33.1e-3);
+// Rayleigh scattering coefficients at sea level (wavelength-dependent)
+// beta_R(lambda) ~ 1/lambda^4 : blue scatters ~5.7x more than red
+constant float3 C_RAYLEIGH = float3(5.802e-3, 13.558e-3, 33.1e-3);
 
-// Ozone absorption coefficients (wavelength-dependent absorption in stratosphere)
-// beta_abs = 4*pi*n_i / lambda
-constant float3 OZONE_ABSORPTION = float3(0.650e-3, 1.881e-3, 0.085e-3);
+// Ozone absorption (stratospheric)
+constant float3 C_OZONE = float3(0.650e-3, 1.881e-3, 0.085e-3);
 
-// Mie scattering coefficient at sea level
-// beta_scat^M = 0.434 * C(T) * pi * (2*pi/lambda)^(v-2) * K
-constant float MIE_SCAT_COEFF = 3.996e-3;
-// Mie absorption (extinction = scattering + absorption)
-constant float MIE_ABS_COEFF = 0.440e-3;
+// Mie scattering and absorption
+constant float C_MIE_SCAT = 3.996e-3;
+constant float C_MIE_ABS  = 0.440e-3;
+constant float C_MIE_EXT  = C_MIE_SCAT + C_MIE_ABS; // extinction
 
-// Scale heights (normalized to atmosphere thickness of 60km)
-constant float H_RAYLEIGH = 8.5 / 60.0;   // H_R: Rayleigh scale height
-constant float H_MIE      = 1.2 / 60.0;   // H_M: Mie scale height
-constant float H_OZONE    = 25.0 / 60.0;  // Peak ozone layer height
+// Scale heights (as fraction of atmosphere thickness)
+constant float H_R = 8.5 / 60.0;   // Rayleigh: 8.5 km
+constant float H_M = 1.2 / 60.0;   // Mie: 1.2 km
 
-// Mie asymmetry parameters for double Henyey-Greenstein
-constant float MIE_G1 = 0.76;   // Forward scattering lobe
-constant float MIE_G2 = -0.50;  // Backward scattering lobe
-constant float MIE_ALPHA = 0.90; // Blend weight (90% forward, 10% backward)
+// Mie anisotropy (Cornette-Shanks clamped)
+constant float MIE_G = 0.76;
 
-constant int LUT_TRANSMITTANCE_W = 256;
-constant int LUT_TRANSMITTANCE_H = 64;
-constant int LUT_MULTISCATTER_SIZE = 32;
+constant int LUT_TRANS_W = 256;
+constant int LUT_TRANS_H = 64;
+constant int LUT_MS_SIZE = 32;
 
 // MARK: - Phase Functions
 
-// Rayleigh Phase Function:
-// P_R(theta) = 0.7629 * (1 + 0.932 * cos^2(theta)) * 1/(4*pi)
-float rayleighPhase(float cosTheta) {
-    return 0.7629 * (1.0 + 0.932 * cosTheta * cosTheta) * INV_4PI;
+// Rayleigh: symmetric, 3/(16*pi) * (1 + cos^2 theta)
+float phaseRayleigh(float costh) {
+    return (3.0 / (16.0 * PI)) * (1.0 + costh * costh);
 }
 
-// Single Henyey-Greenstein lobe
-float henyeyGreenstein(float cosTheta, float g) {
+// Mie: Cornette-Shanks (improved Henyey-Greenstein, avoids singularity)
+float phaseMie(float costh, float g) {
     float g2 = g * g;
-    return (1.0 - g2) / (pow(1.0 + g2 - 2.0 * g * cosTheta, 1.5)) * INV_4PI;
+    float k = 1.55 * g - 0.55 * g * g2; // Cornette-Shanks clamping
+    float kcosth = k * costh;
+    return (1.0 - k * k) / ((4.0 * PI) * (1.0 - kcosth) * (1.0 - kcosth));
 }
 
-// Mie Phase Function — Double Henyey-Greenstein approximation:
-// P_M(theta) = alpha * HG(theta, g1) + (1-alpha) * HG(theta, g2)
-// g1 = forward lobe, g2 = backward lobe, alpha = weight
-float miePhase(float cosTheta) {
-    return MIE_ALPHA * henyeyGreenstein(cosTheta, MIE_G1)
-       + (1.0 - MIE_ALPHA) * henyeyGreenstein(cosTheta, MIE_G2);
+// MARK: - Density Functions
+
+float densityR(float h, float planetR, float atmR) {
+    return exp(-max(0.0, (h - planetR) / (atmR - planetR)) / H_R);
 }
 
-// MARK: - Atmospheric Density Functions
-
-// Rayleigh density: exp(-h / H_R)
-float densityRayleigh(float height, float planetR, float atmR) {
-    float h = (height - planetR) / (atmR - planetR);
-    return exp(-h / H_RAYLEIGH);
+float densityM(float h, float planetR, float atmR) {
+    return exp(-max(0.0, (h - planetR) / (atmR - planetR)) / H_M);
 }
 
-// Mie density: exp(-h / H_M)
-float densityMie(float height, float planetR, float atmR) {
-    float h = (height - planetR) / (atmR - planetR);
-    return exp(-h / H_MIE);
+float densityO(float h, float planetR, float atmR) {
+    float normalized = (h - planetR) / (atmR - planetR);
+    float ozonePeak = 25.0 / 60.0;
+    return max(0.0, 1.0 - abs(normalized - ozonePeak) / (ozonePeak * 0.5)) * 0.3;
 }
 
-// Ozone density: triangular distribution centered around 25km
-float densityOzone(float height, float planetR, float atmR) {
-    float h = (height - planetR) / (atmR - planetR);
-    return max(0.0, 1.0 - abs(h - H_OZONE) / (H_OZONE * 0.5)) * 0.3;
-}
+// MARK: - Ray-Sphere Intersection
 
-// MARK: - Ray-Sphere Intersection (Branchless)
-
-float2 raySphereIntersect(float3 rayOrigin, float3 rayDir, float3 center, float radius) {
-    float3 oc = rayOrigin - center;
-    float b = dot(oc, rayDir);
+float2 raySphereIntersect(float3 ro, float3 rd, float3 center, float radius) {
+    float3 oc = ro - center;
+    float b = dot(oc, rd);
     float c = dot(oc, oc) - radius * radius;
-    float discriminant = b * b - c;
-
-    // Branchless: return -1 for both if no intersection
-    float sqrtD = sqrt(max(0.0, discriminant));
-    float valid = step(0.0, discriminant); // 1.0 if hit, 0.0 if miss
+    float disc = b * b - c;
+    float sqrtD = sqrt(max(0.0, disc));
+    float valid = step(0.0, disc);
     return float2(-b - sqrtD, -b + sqrtD) * valid + float2(-1.0) * (1.0 - valid);
 }
 
-// MARK: - Extinction Coefficient
-// beta_e = beta_scatter + beta_absorb (Rayleigh + Mie + Ozone)
+// MARK: - Transmittance (Absorption)
 
-float3 extinctionAtHeight(float height, float planetR, float atmR) {
-    float dR = densityRayleigh(height, planetR, atmR);
-    float dM = densityMie(height, planetR, atmR);
-    float dO = densityOzone(height, planetR, atmR);
-
-    // Rayleigh: extinction ≈ scattering (no absorption for air molecules)
-    // Mie: extinction = scattering + absorption
-    // Ozone: pure absorption
-    return RAYLEIGH_COEFF * dR
-         + (MIE_SCAT_COEFF + MIE_ABS_COEFF) * dM
-         + OZONE_ABSORPTION * dO;
+// T(A→B) = exp(-optical_depth(A,B))
+// optical_depth = integral of extinction coefficient along path
+float3 absorb(float3 opticalDepth) {
+    return exp(-(opticalDepth.x * C_RAYLEIGH
+               + opticalDepth.y * C_MIE_EXT
+               + opticalDepth.z * C_OZONE));
 }
 
-// Scattering coefficient at a given height (excludes absorption)
-float3 scatteringRayleighAt(float height, float planetR, float atmR) {
-    return RAYLEIGH_COEFF * densityRayleigh(height, planetR, atmR);
-}
-
-float scatteringMieAt(float height, float planetR, float atmR) {
-    return MIE_SCAT_COEFF * densityMie(height, planetR, atmR);
-}
-
-// MARK: - Optical Depth (tau) Integration
-// tau(x1, x2) = integral of beta_e(x) dx along the ray
-
-float3 computeOpticalDepth(float3 start, float3 dir, float segmentLength,
-                           float planetR, float atmR, int steps) {
-    float stepSize = segmentLength / float(steps);
-    float3 opticalDepth = float3(0.0);
-
+float3 integrateOpticalDepth(float3 start, float3 dir, float dist,
+                              float planetR, float atmR, int steps) {
+    float stepSize = dist / float(steps);
+    float3 od = float3(0.0); // x=rayleigh, y=mie, z=ozone
     for (int i = 0; i < steps; i++) {
-        float3 samplePoint = start + dir * (float(i) + 0.5) * stepSize;
-        float height = length(samplePoint);
-        opticalDepth += extinctionAtHeight(height, planetR, atmR) * stepSize;
+        float3 p = start + dir * (float(i) + 0.5) * stepSize;
+        float h = length(p);
+        od.x += densityR(h, planetR, atmR);
+        od.y += densityM(h, planetR, atmR);
+        od.z += densityO(h, planetR, atmR);
     }
-
-    return opticalDepth;
-}
-
-// Transmittance: T(x1, x2) = exp(-tau(x1, x2))
-float3 transmittance(float3 start, float3 dir, float segmentLength,
-                     float planetR, float atmR, int steps) {
-    return exp(-computeOpticalDepth(start, dir, segmentLength, planetR, atmR, steps));
+    return od * stepSize;
 }
 
 // MARK: - Transmittance LUT Compute Shader
@@ -183,128 +140,105 @@ kernel void computeTransmittanceLUT(
     texture2d<float, access::write> lut [[texture(0)]],
     uint2 gid [[thread_position_in_grid]]
 ) {
-    if (gid.x >= uint(LUT_TRANSMITTANCE_W) || gid.y >= uint(LUT_TRANSMITTANCE_H)) return;
+    if (gid.x >= uint(LUT_TRANS_W) || gid.y >= uint(LUT_TRANS_H)) return;
 
     float planetR = 1.0;
-    float atmR = 1.04;
+    float atmR = 1.025;
 
-    // Map pixel coords to (cosZenith, height)
-    float u = float(gid.x) / float(LUT_TRANSMITTANCE_W - 1);
-    float v = float(gid.y) / float(LUT_TRANSMITTANCE_H - 1);
+    float u = float(gid.x) / float(LUT_TRANS_W - 1);
+    float v = float(gid.y) / float(LUT_TRANS_H - 1);
 
     float height = mix(planetR, atmR, v);
     float cosZenith = u * 2.0 - 1.0;
     float sinZenith = sqrt(max(0.0, 1.0 - cosZenith * cosZenith));
 
-    float3 rayOrigin = float3(0.0, height, 0.0);
-    float3 rayDir = float3(sinZenith, cosZenith, 0.0);
+    float3 ro = float3(0.0, height, 0.0);
+    float3 rd = float3(sinZenith, cosZenith, 0.0);
 
-    // Find intersection with atmosphere top
-    float2 atmIntersect = raySphereIntersect(rayOrigin, rayDir, float3(0.0), atmR);
+    float2 atmHit = raySphereIntersect(ro, rd, float3(0.0), atmR);
+    float rayLen = max(0.0, atmHit.y);
 
-    // No atmosphere hit
-    float valid = step(0.0, atmIntersect.y);
-    float rayLength = atmIntersect.y * valid;
+    float2 planetHit = raySphereIntersect(ro, rd, float3(0.0), planetR);
+    rayLen = mix(rayLen, min(rayLen, max(0.0, planetHit.x)), step(0.0, planetHit.x));
 
-    // Clip to planet surface if ray hits ground
-    float2 planetIntersect = raySphereIntersect(rayOrigin, rayDir, float3(0.0), planetR);
-    float hitsPlanet = step(0.0, planetIntersect.x);
-    rayLength = mix(rayLength, min(rayLength, planetIntersect.x), hitsPlanet);
+    float3 od = integrateOpticalDepth(ro, rd, rayLen, planetR, atmR, 40);
+    float3 T = absorb(od);
 
-    int steps = 40;
-    float3 T = transmittance(rayOrigin, rayDir, rayLength, planetR, atmR, steps);
-
-    // If no valid ray, transmittance = 1 (no attenuation)
+    float valid = step(0.0, atmHit.y);
     T = mix(float3(1.0), T, valid);
 
     lut.write(float4(T, 1.0), gid);
 }
 
-// MARK: - Multiple Scattering LUT Compute Shader
-// Approximation: F_ms = 1 / (1 - f_ms) where f_ms is energy transfer factor
+// MARK: - Multiple Scattering LUT (F_ms = 1/(1-f_ms) approximation)
 
 kernel void computeMultipleScatteringLUT(
     texture2d<float, access::write> lut [[texture(0)]],
     texture2d<float, access::read> transmittanceLUT [[texture(1)]],
     uint2 gid [[thread_position_in_grid]]
 ) {
-    if (gid.x >= uint(LUT_MULTISCATTER_SIZE) || gid.y >= uint(LUT_MULTISCATTER_SIZE)) return;
+    if (gid.x >= uint(LUT_MS_SIZE) || gid.y >= uint(LUT_MS_SIZE)) return;
 
     float planetR = 1.0;
-    float atmR = 1.04;
+    float atmR = 1.025;
 
-    float u = float(gid.x) / float(LUT_MULTISCATTER_SIZE - 1);
-    float v = float(gid.y) / float(LUT_MULTISCATTER_SIZE - 1);
+    float u = float(gid.x) / float(LUT_MS_SIZE - 1);
+    float v = float(gid.y) / float(LUT_MS_SIZE - 1);
 
     float height = mix(planetR, atmR, v);
-    float cosSunZenith = u * 2.0 - 1.0;
-    float sinSunZenith = sqrt(max(0.0, 1.0 - cosSunZenith * cosSunZenith));
-    float3 sunDir = float3(sinSunZenith, cosSunZenith, 0.0);
+    float cosSunZ = u * 2.0 - 1.0;
+    float sinSunZ = sqrt(max(0.0, 1.0 - cosSunZ * cosSunZ));
+    float3 sunDir = float3(sinSunZ, cosSunZ, 0.0);
 
-    // Integrate 2nd-order scattering over the sphere of directions
-    // to compute the energy transfer factor f_ms
-    float3 totalScattering = float3(0.0);
-    float3 totalTransferEnergy = float3(0.0);
-    int dirSamples = 8;
+    float3 totalScatter = float3(0.0);
+    float3 totalTransfer = float3(0.0);
+    int N = 8;
 
-    for (int i = 0; i < dirSamples; i++) {
-        for (int j = 0; j < dirSamples; j++) {
-            float theta = PI * (float(i) + 0.5) / float(dirSamples);
-            float phi = 2.0 * PI * (float(j) + 0.5) / float(dirSamples);
-            float sinTheta = sin(theta);
-
-            float3 dir = float3(sinTheta * cos(phi), cos(theta), sinTheta * sin(phi));
+    for (int i = 0; i < N; i++) {
+        for (int j = 0; j < N; j++) {
+            float theta = PI * (float(i) + 0.5) / float(N);
+            float phi = 2.0 * PI * (float(j) + 0.5) / float(N);
+            float sinT = sin(theta);
+            float3 dir = float3(sinT * cos(phi), cos(theta), sinT * sin(phi));
 
             float3 pos = float3(0, height, 0);
             float2 atmHit = raySphereIntersect(pos, dir, float3(0), atmR);
             float rayLen = max(0.0, atmHit.y);
-            float2 planetHit = raySphereIntersect(pos, dir, float3(0), planetR);
-            rayLen = mix(rayLen, min(rayLen, max(0.0, planetHit.x)), step(0.0, planetHit.x));
+            float2 pH = raySphereIntersect(pos, dir, float3(0), planetR);
+            rayLen = mix(rayLen, min(rayLen, max(0.0, pH.x)), step(0.0, pH.x));
 
-            float stepSize = rayLen / 8.0;
-            float3 pathScatter = float3(0.0);
-            float3 pathTransfer = float3(0.0);
-
+            float stepSz = rayLen / 8.0;
             for (int s = 0; s < 8; s++) {
-                float3 samplePos = pos + dir * (float(s) + 0.5) * stepSize;
-                float h = length(samplePos);
-                float3 sampleUp = normalize(samplePos);
+                float3 sp = pos + dir * (float(s) + 0.5) * stepSz;
+                float h = length(sp);
+                float dR = densityR(h, planetR, atmR);
+                float dM = densityM(h, planetR, atmR);
+                float3 scatter = C_RAYLEIGH * dR + C_MIE_SCAT * dM;
 
-                float dR = densityRayleigh(h, planetR, atmR);
-                float dM = densityMie(h, planetR, atmR);
-                float3 localScatter = RAYLEIGH_COEFF * dR + MIE_SCAT_COEFF * dM;
-
-                // Look up transmittance to sun from this sample point
-                float cosSun = dot(sampleUp, sunDir);
+                float cosSun = dot(normalize(sp), sunDir);
                 float lutU = (cosSun + 1.0) * 0.5;
                 float lutV = saturate((h - planetR) / (atmR - planetR));
-                uint2 lutCoord = uint2(uint(lutU * float(LUT_TRANSMITTANCE_W - 1)),
-                                       uint(saturate(lutV) * float(LUT_TRANSMITTANCE_H - 1)));
-                float3 sunTrans = transmittanceLUT.read(lutCoord).rgb;
+                uint2 lc = uint2(uint(lutU * float(LUT_TRANS_W - 1)),
+                                 uint(lutV * float(LUT_TRANS_H - 1)));
+                float3 sunT = transmittanceLUT.read(lc).rgb;
 
-                pathScatter += localScatter * sunTrans * stepSize;
-                pathTransfer += localScatter * stepSize;
+                totalScatter += scatter * sunT * stepSz;
+                totalTransfer += scatter * stepSz;
             }
-
-            float solidAngle = sinTheta; // jacobian for spherical integration
-            totalScattering += pathScatter * solidAngle;
-            totalTransferEnergy += pathTransfer * solidAngle;
+            totalScatter *= sinT;
+            totalTransfer *= sinT;
         }
     }
 
-    float normFactor = (4.0 * PI) / float(dirSamples * dirSamples);
-    totalScattering *= normFactor;
-    totalTransferEnergy *= normFactor;
+    float norm = (4.0 * PI) / float(N * N);
+    totalScatter *= norm;
+    totalTransfer *= norm;
 
-    // Infinite multiple scattering approximation:
-    // F_ms = 1 / (1 - f_ms), where f_ms = totalTransferEnergy (isotropic phase = 1/4pi)
-    float3 f_ms = totalTransferEnergy * INV_4PI;
+    float3 f_ms = totalTransfer * INV_4PI;
     float3 F_ms = 1.0 / max(float3(0.001), 1.0 - f_ms);
+    float3 result = totalScatter * INV_4PI * F_ms;
 
-    // Final multiply: 2nd-order scattered light * infinite bounce factor
-    float3 multiScattered = totalScattering * INV_4PI * F_ms;
-
-    lut.write(float4(multiScattered, 1.0), gid);
+    lut.write(float4(result, 1.0), gid);
 }
 
 // MARK: - Earth Surface Vertex Shader
@@ -314,7 +248,6 @@ vertex VertexOut earthVertexShader(
     constant Uniforms &uniforms [[buffer(1)]]
 ) {
     VertexOut out;
-
     float4 worldPos = uniforms.modelMatrix * float4(in.position, 1.0);
     out.worldPosition = worldPos.xyz;
     out.position = uniforms.projectionMatrix * uniforms.viewMatrix * worldPos;
@@ -322,12 +255,10 @@ vertex VertexOut earthVertexShader(
     float3x3 normalMat = float3x3(uniforms.normalMatrix[0].xyz,
                                     uniforms.normalMatrix[1].xyz,
                                     uniforms.normalMatrix[2].xyz);
-
     out.worldNormal = normalize(normalMat * in.normal);
     out.worldTangent = normalize(normalMat * in.tangent);
     out.worldBitangent = normalize(normalMat * in.bitangent);
     out.texCoord = in.texCoord;
-
     return out;
 }
 
@@ -351,78 +282,55 @@ fragment float4 earthFragmentShader(
     float3 B = normalize(in.worldBitangent);
     float3 V = normalize(uniforms.cameraPosition - in.worldPosition);
     float3 L = normalize(uniforms.sunDirection);
-
     float2 uv = in.texCoord;
 
-    // --- Normal Mapping ---
-    // Unpack: n_x = 2*R - 1, n_y = 2*G - 1, n_z = 2*B - 1
-    float3 normalSample = normalMap.sample(texSampler, uv).rgb;
-    float3 localNormal = normalize(normalSample * 2.0 - 1.0);
-
-    // TBN matrix: transform tangent-space normal to world space
+    // Normal mapping: unpack n = 2*RGB - 1, transform via TBN
+    float3 localN = normalize(normalMap.sample(texSampler, uv).rgb * 2.0 - 1.0);
     float3x3 TBN = float3x3(T, B, N);
-    float3 worldNormal = normalize(TBN * localNormal);
+    float3 worldN = normalize(TBN * localN);
 
-    // --- Diffuse Lighting ---
-    float NdotL = dot(worldNormal, L);
+    // Diffuse lighting
+    float NdotL = dot(worldN, L);
     float diffuse = max(NdotL, 0.0);
 
-    // Day/night transition with smooth blend via exponential falloff
+    // Day/night blend via exponential falloff
     float dayWeight = saturate(NdotL * 3.0 + 0.3);
     dayWeight = pow(dayWeight, 1.5);
 
     float4 dayColor = dayTexture.sample(texSampler, uv);
     float4 nightColor = nightTexture.sample(texSampler, uv);
+    float3 surfaceColor = mix(nightColor.rgb, dayColor.rgb * (diffuse + 0.06), dayWeight);
 
-    float ambient = 0.06;
-    float3 surfaceColor = mix(nightColor.rgb, dayColor.rgb * (diffuse + ambient), dayWeight);
-
-    // --- Specular / Ocean Reflections ---
-    // reflect(v, w) = v - 2*(v.w)*w
+    // Specular: reflect(-L, N) dot V for ocean glare
     float specMask = specularMap.sample(texSampler, uv).r;
-    float3 R = reflect(-L, worldNormal);
-    float RdotV = max(dot(R, V), 0.0);
+    float3 R = reflect(-L, worldN);
+    float spec = pow(max(dot(R, V), 0.0), 64.0) * specMask * diffuse;
+    surfaceColor += float3(1.0, 0.95, 0.8) * spec * 1.5;
 
-    float specPower = 64.0;
-    float specular = pow(RdotV, specPower) * specMask * diffuse;
-    surfaceColor += float3(1.0, 0.95, 0.8) * specular * 1.5;
-
-    // --- Cloud Layer ---
+    // Clouds + shadows
     float2 cloudUV = uv + float2(uniforms.cloudTime * 0.001, 0.0);
-    float4 cloudSample = cloudTexture.sample(texSampler, cloudUV);
-    // JPEG clouds: derive alpha from luminance
-    float cloudAlpha = max(cloudSample.a, dot(cloudSample.rgb, float3(0.299, 0.587, 0.114)));
+    float4 cSample = cloudTexture.sample(texSampler, cloudUV);
+    float cloudA = max(cSample.a, dot(cSample.rgb, float3(0.299, 0.587, 0.114)));
+    float cDiff = max(dot(N, L), 0.0);
+    float3 cColor = cSample.rgb * (cDiff * 0.9 + 0.1);
 
-    float cloudDiffuse = max(dot(N, L), 0.0);
-    float3 cloudColor = cloudSample.rgb * (cloudDiffuse * 0.9 + 0.1);
-
-    // --- Cloud Shadows ---
-    // Project shadow along surface: dot(N, L)*N - L converted to local coords
-    float3 shadowOffset3D = dot(N, L) * N - L;
+    float3 shadowOff = dot(N, L) * N - L;
     float3x3 invTBN = transpose(TBN);
-    float3 shadowLocal = invTBN * shadowOffset3D;
-    float2 shadowUV = uv + shadowLocal.xy * 0.005;
-    float4 shadowSample = cloudTexture.sample(texSampler, shadowUV + float2(uniforms.cloudTime * 0.001, 0.0));
-    float shadowCloud = max(shadowSample.a, dot(shadowSample.rgb, float3(0.299, 0.587, 0.114)));
+    float2 sUV = uv + (invTBN * shadowOff).xy * 0.005;
+    float4 sSample = cloudTexture.sample(texSampler, sUV + float2(uniforms.cloudTime * 0.001, 0.0));
+    float sCloud = max(sSample.a, dot(sSample.rgb, float3(0.299, 0.587, 0.114)));
+    surfaceColor *= 1.0 - sCloud * 0.35 * saturate(NdotL);
+    surfaceColor = mix(surfaceColor, cColor, cloudA * 0.85);
 
-    float shadowFactor = 1.0 - shadowCloud * 0.35 * saturate(NdotL);
-    surfaceColor *= shadowFactor;
-
-    surfaceColor = mix(surfaceColor, cloudColor, cloudAlpha * 0.85);
-
-    // --- Surface Transmittance ---
-    // T(surface, camera) from LUT — atmospheric extinction on surface radiance
+    // Surface transmittance from LUT
     float planetR = uniforms.planetRadius;
     float atmR = uniforms.atmosphereRadius;
-    float3 surfNormalized = normalize(in.worldPosition);
-    float surfHeight = length(in.worldPosition);
-    float cosViewZenith = dot(surfNormalized, V);
-
-    float lutU = (cosViewZenith + 1.0) * 0.5;
-    float lutV = saturate((surfHeight - planetR) / (atmR - planetR));
-    float3 viewTransmittance = transmittanceLUT.sample(texSampler, float2(lutU, lutV)).rgb;
-
-    surfaceColor *= viewTransmittance;
+    float3 sNorm = normalize(in.worldPosition);
+    float cosVZ = dot(sNorm, V);
+    float lutU = (cosVZ + 1.0) * 0.5;
+    float lutV = saturate((length(in.worldPosition) - planetR) / (atmR - planetR));
+    float3 viewT = transmittanceLUT.sample(texSampler, float2(lutU, lutV)).rgb;
+    surfaceColor *= viewT;
 
     return float4(surfaceColor, 1.0);
 }
@@ -434,22 +342,22 @@ vertex AtmosphereVertexOut atmosphereVertexShader(
     constant Uniforms &uniforms [[buffer(1)]]
 ) {
     AtmosphereVertexOut out;
-
     float4 worldPos = uniforms.modelMatrix * float4(in.position, 1.0);
     out.worldPosition = worldPos.xyz;
     out.localPosition = in.position;
     out.position = uniforms.projectionMatrix * uniforms.viewMatrix * worldPos;
-
     return out;
 }
 
 // MARK: - Atmosphere Fragment Shader (Physical Ray Marching)
 //
-// Implements the full rendering equation:
-// L_tot = T(x,x0)*L_surface + integral{ beta_s(y)*T(x,y) * [P_R*L_sun*T_sun + P_M*L_sun*T_sun + F_ms] } dy
-//
-// With Rayleigh scattering (blue glow), Mie scattering (sun halo),
-// ozone absorption, and infinite multiple scattering approximation.
+// Full rendering equation with:
+// - Rayleigh scattering (wavelength-dependent blue glow, 1/lambda^4)
+// - Mie scattering (Cornette-Shanks, forward-scatter sun halo)
+// - Ozone absorption
+// - Exponential sample distribution (concentrated near surface)
+// - Transmittance + multiple scattering LUTs
+// - Sigmoid day/night transition for the glow
 
 fragment float4 atmosphereFragmentShader(
     AtmosphereVertexOut in [[stage_in]],
@@ -457,7 +365,7 @@ fragment float4 atmosphereFragmentShader(
     texture2d<float> transmittanceLUT [[texture(0)]],
     texture2d<float> multiScatterLUT [[texture(1)]]
 ) {
-    constexpr sampler texSampler(mag_filter::linear, min_filter::linear, address::clamp_to_edge);
+    constexpr sampler lutSampler(mag_filter::linear, min_filter::linear, address::clamp_to_edge);
 
     float planetR = uniforms.planetRadius;
     float atmR = uniforms.atmosphereRadius;
@@ -467,122 +375,163 @@ fragment float4 atmosphereFragmentShader(
 
     // Ray-atmosphere intersection
     float2 atmHit = raySphereIntersect(camPos, rayDir, float3(0.0), atmR);
-
-    // Discard if no atmosphere hit (branchless not possible for discard)
     if (atmHit.y < 0.0) discard_fragment();
 
-    float rayStart = max(atmHit.x, 0.0);
-    float rayEnd = atmHit.y;
+    float tStart = max(atmHit.x, 0.0);
+    float tEnd = atmHit.y;
 
-    // Planet occlusion (branchless clamp)
+    // Planet occlusion
     float2 planetHit = raySphereIntersect(camPos, rayDir, float3(0.0), planetR);
     float hitsPlanet = step(0.0, planetHit.x);
-    rayEnd = mix(rayEnd, min(rayEnd, planetHit.x), hitsPlanet);
+    tEnd = mix(tEnd, min(tEnd, planetHit.x), hitsPlanet);
 
-    float rayLength = rayEnd - rayStart;
+    float rayLength = tEnd - tStart;
     if (rayLength <= 0.0) discard_fragment();
 
-    // --- Phase functions (computed once, constant along ray) ---
+    // Phase functions (constant along ray)
     float cosTheta = dot(rayDir, sunDir);
-    float phaseR = rayleighPhase(cosTheta);
-    float phaseM = miePhase(cosTheta);
+    float phR = phaseRayleigh(cosTheta);
+    float phM = phaseMie(cosTheta, MIE_G);
 
-    // --- Day/night mask at atmosphere entry point ---
-    // Used to modulate the glow: visible on sunlit side, fades on dark side
-    float3 entryPoint = camPos + rayDir * rayStart;
-    float3 entryNormal = normalize(entryPoint);
-    float sunIncidence = dot(entryNormal, sunDir);
-    // Smooth transition across terminator (wider than surface to show twilight glow)
-    float dayMask = saturate(sunIncidence * 2.0 + 0.5);
-
-    // --- Ray marching ---
+    // Ray marching with exponential sample distribution
+    // More samples near the planet surface where density is highest
     int numSteps = 32;
-    float stepSize = rayLength / float(numSteps);
-    float sunIntensity = 22.0;
+    float exposure = 20.0;
 
-    float3 inScatteredLight = float3(0.0);
-    float3 totalExtinction = float3(0.0); // accumulated optical depth
+    float3 rayleighSum = float3(0.0);
+    float3 mieSum = float3(0.0);
+    float3 opticalDepth = float3(0.0); // x=R, y=M, z=O
 
+    float prevT = 0.0;
     for (int i = 0; i < numSteps; i++) {
-        float3 samplePos = camPos + rayDir * (rayStart + (float(i) + 0.5) * stepSize);
+        // Exponential distribution: concentrate samples near surface
+        float t_frac = float(i + 1) / float(numSteps);
+        float t_exp = t_frac * t_frac; // Quadratic = more samples near start
+        float t_cur = t_exp * rayLength;
+        float stepSize = t_cur - prevT;
+        prevT = t_cur;
+
+        float3 samplePos = camPos + rayDir * (tStart + t_cur - stepSize * 0.5);
         float sampleHeight = length(samplePos);
 
-        // Density at sample point
-        float dR = densityRayleigh(sampleHeight, planetR, atmR);
-        float dM = densityMie(sampleHeight, planetR, atmR);
-        float dO = densityOzone(sampleHeight, planetR, atmR);
-
-        // Local extinction: beta_e = beta_scatter + beta_absorb
-        float3 localExtinction = RAYLEIGH_COEFF * dR
-                               + (MIE_SCAT_COEFF + MIE_ABS_COEFF) * dM
-                               + OZONE_ABSORPTION * dO;
+        // Density at this height
+        float dR = densityR(sampleHeight, planetR, atmR);
+        float dM = densityM(sampleHeight, planetR, atmR);
+        float dO = densityO(sampleHeight, planetR, atmR);
 
         // Accumulate optical depth along view ray
-        totalExtinction += localExtinction * stepSize;
+        opticalDepth += float3(dR, dM, dO) * stepSize;
 
-        // Transmittance from camera to this sample: T(camera, sample) = exp(-tau)
-        float3 viewTrans = exp(-totalExtinction);
+        // Transmittance from camera to this sample: T = exp(-tau)
+        float3 viewTrans = absorb(opticalDepth);
 
-        // Transmittance from sample to sun via LUT
-        float3 sampleNorm = normalize(samplePos);
-        float cosSunZenith = dot(sampleNorm, sunDir);
-        float heightFrac = saturate((sampleHeight - planetR) / (atmR - planetR));
-        float sLutU = (cosSunZenith + 1.0) * 0.5;
-        float3 sunTrans = transmittanceLUT.sample(texSampler, float2(sLutU, heightFrac)).rgb;
+        // Transmittance from sample to sun (LUT)
+        float3 sNorm = normalize(samplePos);
+        float cosSunZ = dot(sNorm, sunDir);
+        float hFrac = saturate((sampleHeight - planetR) / (atmR - planetR));
+        float2 lutUV = float2((cosSunZ + 1.0) * 0.5, hFrac);
+        float3 sunTrans = transmittanceLUT.sample(lutSampler, lutUV).rgb;
 
-        // Multiple scattering contribution (precomputed F_ms factor included)
-        float3 multiScatter = multiScatterLUT.sample(texSampler, float2(sLutU, heightFrac)).rgb;
+        // Multiple scattering (precomputed with F_ms infinite bounce factor)
+        float3 ms = multiScatterLUT.sample(lutSampler, lutUV).rgb;
 
-        // Scattering coefficients (only scattering, not absorption)
-        float3 scatR = RAYLEIGH_COEFF * dR;
-        float scatM = MIE_SCAT_COEFF * dM;
+        // Accumulate in-scattered light
+        float3 scatR = C_RAYLEIGH * dR;
+        float scatM = C_MIE_SCAT * dM;
 
-        // In-scattered radiance at this sample:
-        // L_inscatter = beta_s * T_view * [T_sun * (P_R + P_M) * L_sun + F_ms * L_sun]
-        float3 singleScatterR = scatR * phaseR * sunTrans;
-        float3 singleScatterM = float3(scatM) * phaseM * sunTrans;
-        float3 multiScatterContrib = (scatR + float3(scatM)) * multiScatter;
-
-        inScatteredLight += viewTrans * (singleScatterR + singleScatterM + multiScatterContrib) * stepSize;
+        rayleighSum += viewTrans * scatR * (sunTrans * phR + ms) * stepSize;
+        mieSum += viewTrans * float3(scatM) * (sunTrans * phM + ms * 0.5) * stepSize;
     }
 
-    float3 atmosphere = inScatteredLight * sunIntensity;
+    float3 atmosphere = (rayleighSum + mieSum) * exposure;
 
-    // --- Fresnel Edge Glow (Bright Blue Rim) ---
-    // Visible ALL around the planet (day and night side)
-    // Tight, concentrated glow right at the limb
-    float3 surfPoint = camPos + rayDir * rayStart;
-    float3 surfNorm = normalize(surfPoint);
-    float fresnelAngle = 1.0 - abs(dot(surfNorm, -rayDir));
+    // --- Limb glow enhancement ---
+    // The physical scattering naturally creates a blue rim because longer optical
+    // paths at grazing angles scatter more blue light. But we enhance it slightly
+    // with a Schlick Fresnel term for the characteristic bright edge.
+    float3 entryPoint = camPos + rayDir * tStart;
+    float3 entryNorm = normalize(entryPoint);
+    float NdotV = abs(dot(entryNorm, -rayDir));
 
-    // Tight electric blue rim — high power for sharp falloff, visible everywhere
-    float rimIntensity = pow(fresnelAngle, 3.0);
-    float3 rimColor = float3(0.15, 0.4, 1.0); // Deep electric/cobalt blue
+    // Schlick Fresnel: R = R0 + (1-R0)*(1-cos)^5
+    float R0 = 0.02; // Low base reflectance for atmosphere
+    float schlickFresnel = R0 + (1.0 - R0) * pow(1.0 - NdotV, 5.0);
 
-    // Day side: brighter rim + physical scattering
-    // Night side: still visible rim but slightly dimmer
-    float rimDayBoost = mix(0.7, 1.0, dayMask); // Night=0.7x, Day=1.0x
-    atmosphere += rimColor * rimIntensity * rimDayBoost * 1.2;
+    // Day/night sigmoid: 1/(1 + exp(-7*(cosAngle + 0.1)))
+    float sunAngle = dot(entryNorm, sunDir);
+    float dayMask = 1.0 / (1.0 + exp(-7.0 * (sunAngle + 0.1)));
 
-    // Extra-bright thin edge line (very high power Fresnel for the sharp limb)
-    float thinEdge = pow(fresnelAngle, 8.0);
-    atmosphere += float3(0.3, 0.6, 1.0) * thinEdge * 0.8;
+    // Apply Fresnel as limb brightening
+    // Day side: full blue rim. Night side: dim but still visible
+    float rimDayNight = mix(0.4, 1.0, dayMask);
+    float3 rimColor = float3(0.15, 0.4, 1.0) * schlickFresnel * rimDayNight * 1.5;
+    atmosphere += rimColor;
 
-    // --- Tone Mapping (ACES approximation) ---
+    // --- Tone Mapping (ACES) ---
     float3 x = atmosphere;
-    atmosphere = (x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14);
-    atmosphere = saturate(atmosphere);
+    atmosphere = saturate((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14));
 
-    // Alpha: strong at the rim for the visible glow ring
-    float alpha = saturate(dot(atmosphere, float3(0.299, 0.587, 0.114)) * 3.0 + rimIntensity * 0.6);
+    // Alpha: based on luminance + rim strength
+    float lum = dot(atmosphere, float3(0.299, 0.587, 0.114));
+    float alpha = saturate(lum * 3.0 + schlickFresnel * 0.8);
 
-    // Reduce alpha over planet surface
-    alpha = mix(alpha, alpha * 0.5, hitsPlanet);
+    // Dim over planet surface (surface shader handles its own light)
+    alpha = mix(alpha, alpha * 0.45, hitsPlanet);
 
     return float4(atmosphere, alpha);
 }
 
-// MARK: - Preview Fragment Shader (Single Texture on Globe)
+// MARK: - Outer Glow Fragment Shader (Soft Bloom Beyond Atmosphere)
+//
+// This is NOT the main glow source — the ray marching above handles that.
+// This is a very subtle soft bloom that extends slightly beyond the
+// atmosphere boundary, simulating light scattered into space.
+
+fragment float4 outerGlowFragmentShader(
+    AtmosphereVertexOut in [[stage_in]],
+    constant Uniforms &uniforms [[buffer(1)]]
+) {
+    float planetR = uniforms.planetRadius;
+    float atmR = uniforms.atmosphereRadius;
+    float3 sunDir = normalize(uniforms.sunDirection);
+    float3 camPos = uniforms.cameraPosition;
+    float3 rayDir = normalize(in.worldPosition - camPos);
+
+    // Don't draw over planet
+    float2 planetHit = raySphereIntersect(camPos, rayDir, float3(0.0), planetR);
+    float overPlanet = step(0.0, planetHit.x);
+
+    float3 fragN = normalize(in.worldPosition);
+    float dist = length(in.worldPosition);
+
+    // How far beyond the atmosphere boundary
+    float beyondAtm = (dist - atmR) / (atmR * 0.06); // Normalize to glow thickness
+    float radialFade = saturate(1.0 - beyondAtm);
+    radialFade = radialFade * radialFade * radialFade; // Cubic falloff
+
+    // Fresnel for limb concentration
+    float NdotV = abs(dot(fragN, -rayDir));
+    float fresnel = pow(1.0 - NdotV, 3.0);
+
+    // Day/night sigmoid
+    float sunAngle = dot(fragN, sunDir);
+    float dayMask = 1.0 / (1.0 + exp(-7.0 * (sunAngle + 0.1)));
+    float rimMod = mix(0.3, 1.0, dayMask);
+
+    // Subtle blue bloom, color from Rayleigh scattering
+    float intensity = fresnel * radialFade * rimMod;
+    float3 color = float3(0.12, 0.32, 0.9) * intensity * 0.5;
+
+    // Very faint Mie forward scatter
+    float mie = pow(max(0.0, dot(rayDir, sunDir)), 20.0) * radialFade;
+    color += float3(0.3, 0.35, 0.5) * mie * 0.15;
+
+    float alpha = saturate(intensity * 0.8 + mie * 0.1) * (1.0 - overPlanet);
+
+    return float4(color, alpha);
+}
+
+// MARK: - Preview Fragment Shader
 
 fragment float4 previewFragmentShader(
     VertexOut in [[stage_in]],
@@ -594,85 +543,9 @@ fragment float4 previewFragmentShader(
 
     float3 N = normalize(in.worldNormal);
     float3 L = normalize(uniforms.sunDirection);
-
     float2 uv = in.texCoord;
     float4 texColor = previewTexture.sample(texSampler, uv);
-
-    float diffuse = max(dot(N, L), 0.0);
-    float lighting = diffuse * 0.7 + 0.3;
+    float lighting = max(dot(N, L), 0.0) * 0.7 + 0.3;
 
     return float4(texColor.rgb * lighting, 1.0);
-}
-
-// MARK: - Outer Glow Fragment Shader (Electric Blue Rim Halo)
-//
-// Creates the bright blue atmospheric rim glow visible all around the planet.
-// Matches the reference: tight, vivid cobalt blue rim hugging the limb,
-// visible on both day and night sides, with sharp falloff into space.
-
-fragment float4 outerGlowFragmentShader(
-    AtmosphereVertexOut in [[stage_in]],
-    constant Uniforms &uniforms [[buffer(1)]]
-) {
-    float planetR = uniforms.planetRadius;
-    float3 sunDir = normalize(uniforms.sunDirection);
-    float3 camPos = uniforms.cameraPosition;
-    float3 fragWorldPos = in.worldPosition;
-    float3 rayDir = normalize(fragWorldPos - camPos);
-
-    // Don't draw over the planet surface
-    float2 planetHit = raySphereIntersect(camPos, rayDir, float3(0.0), planetR);
-    float overPlanet = step(0.0, planetHit.x);
-
-    // Fragment's position relative to planet center
-    float3 fragNormal = normalize(fragWorldPos);
-    float distFromCenter = length(fragWorldPos);
-
-    // --- Radial distance falloff ---
-    // Glow is tightest near the planet surface and drops off sharply
-    float glowOuterEdge = planetR * 1.08; // Glow extends ~8% beyond surface
-    float normalizedDist = (distFromCenter - planetR) / (glowOuterEdge - planetR);
-    float radialFalloff = saturate(1.0 - normalizedDist);
-    radialFalloff = pow(radialFalloff, 1.5); // Sharp falloff
-
-    // --- Fresnel (limb brightening) ---
-    // Glow is brightest at the very edge of the planet silhouette
-    float3 viewDir = -rayDir;
-    float NdotV = abs(dot(fragNormal, viewDir));
-    float fresnel = 1.0 - NdotV;
-    float rimGlow = pow(fresnel, 2.0);
-
-    // --- Day/night modulation (subtle — glow is visible everywhere) ---
-    float sunCosAngle = dot(fragNormal, sunDir);
-    // Night side gets ~60% intensity, day side gets 100%
-    float dayBoost = mix(0.6, 1.0, saturate(sunCosAngle * 1.5 + 0.5));
-
-    // --- Electric blue rim color ---
-    // Deep cobalt blue matching the reference image
-    float3 rimColor = float3(0.1, 0.35, 1.0);
-
-    // Primary glow: tight rim around the entire planet
-    float glowStrength = rimGlow * radialFalloff * dayBoost;
-    float3 glowColor = rimColor * glowStrength * 1.4;
-
-    // Brighter thin edge (very concentrated at the limb)
-    float thinEdge = pow(fresnel, 5.0) * radialFalloff;
-    glowColor += float3(0.2, 0.5, 1.0) * thinEdge * dayBoost * 0.8;
-
-    // Softer wide glow (subtle diffuse spread beyond the sharp rim)
-    float wideGlow = pow(fresnel, 1.2) * pow(radialFalloff, 2.5);
-    glowColor += float3(0.05, 0.15, 0.5) * wideGlow * dayBoost * 0.4;
-
-    // --- Mie sun halo (warm tint near sun direction) ---
-    float sunAlignment = max(0.0, dot(rayDir, sunDir));
-    float mieHalo = pow(sunAlignment, 16.0) * radialFalloff;
-    glowColor += float3(0.4, 0.5, 0.8) * mieHalo * 0.3;
-
-    // Alpha: visible all around, strongest at the rim
-    float alpha = saturate(glowStrength * 1.5 + thinEdge * 1.0 + wideGlow * 0.3);
-
-    // Hide over planet surface
-    alpha *= (1.0 - overPlanet);
-
-    return float4(glowColor, alpha);
 }

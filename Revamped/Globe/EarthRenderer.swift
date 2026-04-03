@@ -69,10 +69,10 @@ final class EarthRenderer: NSObject, MTKViewDelegate {
     // Texture selection: 0=full render, 1=day, 2=night, 3=normal, 4=specular, 5=clouds
     var activeTextureIndex: Int = 0
 
-    // Globe parameters
+    // Globe parameters (atmosphere = 2.5% of planet radius, physically correct)
     private let planetRadius: Float = 1.0
-    private let atmosphereRadius: Float = 1.04
-    private let outerGlowRadius: Float = 1.08 // Tight blue rim glow
+    private let atmosphereRadius: Float = 1.025
+    private let outerGlowRadius: Float = 1.045 // Subtle bloom beyond atmosphere
 
     // Vertex descriptor for MDLMesh
     private var vertexDescriptor: MTLVertexDescriptor!
