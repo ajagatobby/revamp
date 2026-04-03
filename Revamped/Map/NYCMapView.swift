@@ -108,61 +108,56 @@ private struct LiveMapView: UIViewRepresentable {
         private func startJourney() {
             guard let mapView else { return }
 
-            // Camera is already at Cozy Hotel (set in makeUIView) — no jump needed.
-            // Phase 1: Orbit Cozy Hotel
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
-                guard let mapView = self?.mapView else { return }
-                UIView.animate(withDuration: 2.0, delay: 0, options: .curveEaseInOut) {
-                    mapView.camera = MKMapCamera(
-                        lookingAtCenter: NYCMapView.cozyHotel,
-                        fromDistance: 400, pitch: 65, heading: 220
-                    )
-                }
-            }
+            // Camera is already at Cozy Hotel (set in makeUIView).
+            // Chain each phase off the previous completion — no overlaps, no gaps.
 
-            // Phase 2: Pull up heading south
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
-                guard let mapView = self?.mapView else { return }
-                let mid = CLLocationCoordinate2D(
-                    latitude: (NYCMapView.cozyHotel.latitude + NYCMapView.timesSquare.latitude) / 2,
-                    longitude: (NYCMapView.cozyHotel.longitude + NYCMapView.timesSquare.longitude) / 2
+            // Phase 1: Orbit Cozy Hotel (ease-in start)
+            UIView.animate(withDuration: 3.0, delay: 0.1, options: .curveEaseIn, animations: {
+                mapView.camera = MKMapCamera(
+                    lookingAtCenter: NYCMapView.cozyHotel,
+                    fromDistance: 500, pitch: 60, heading: 240
                 )
-                UIView.animate(withDuration: 4.0, delay: 0, options: .curveEaseInOut) {
+            }) { [weak self] _ in
+                guard let mapView = self?.mapView else { return }
+
+                // Phase 2: Pull up heading south (linear — no decel/accel stutter)
+                UIView.animate(withDuration: 5.0, delay: 0, options: .curveLinear, animations: {
+                    let mid = CLLocationCoordinate2D(
+                        latitude: (NYCMapView.cozyHotel.latitude + NYCMapView.timesSquare.latitude) / 2,
+                        longitude: (NYCMapView.cozyHotel.longitude + NYCMapView.timesSquare.longitude) / 2
+                    )
                     mapView.camera = MKMapCamera(
                         lookingAtCenter: mid,
-                        fromDistance: 3000, pitch: 50, heading: 200
+                        fromDistance: 2500, pitch: 50, heading: 210
                     )
-                }
-            }
+                }) { [weak self] _ in
+                    guard let mapView = self?.mapView else { return }
 
-            // Phase 3: Dive into Times Square
-            DispatchQueue.main.asyncAfter(deadline: .now() + 7.0) { [weak self] in
-                guard let mapView = self?.mapView else { return }
-                UIView.animate(withDuration: 4.0, delay: 0, options: .curveEaseInOut) {
-                    mapView.camera = MKMapCamera(
-                        lookingAtCenter: NYCMapView.timesSquare,
-                        fromDistance: 500, pitch: 70, heading: 45
-                    )
+                    // Phase 3: Dive into Times Square (ease-out landing)
+                    UIView.animate(withDuration: 5.0, delay: 0, options: .curveEaseOut, animations: {
+                        mapView.camera = MKMapCamera(
+                            lookingAtCenter: NYCMapView.timesSquare,
+                            fromDistance: 500, pitch: 70, heading: 45
+                        )
+                    }) { [weak self] _ in
+                        // Phase 4: Continuous orbit
+                        self?.startOrbit(heading: 135)
+                    }
                 }
-            }
-
-            // Phase 4: Orbit Times Square
-            DispatchQueue.main.asyncAfter(deadline: .now() + 11.5) { [weak self] in
-                self?.startOrbit(heading: 135)
             }
         }
 
         private func startOrbit(heading: Double) {
             guard let mapView else { return }
-            UIView.animate(withDuration: 10.0, delay: 0, options: .curveEaseInOut) {
+            // Linear for seamless continuous rotation — no stutter between segments
+            UIView.animate(withDuration: 12.0, delay: 0, options: [.curveLinear], animations: {
                 mapView.camera = MKMapCamera(
                     lookingAtCenter: NYCMapView.timesSquare,
                     fromDistance: 500, pitch: 70, heading: heading
                 )
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 10.0) { [weak self] in
-                let next = heading + 90
-                self?.startOrbit(heading: next >= 360 ? next - 360 : next)
+            }) { [weak self] _ in
+                let next = heading.truncatingRemainder(dividingBy: 360) + 90
+                self?.startOrbit(heading: next)
             }
         }
     }
