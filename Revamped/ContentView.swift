@@ -1,23 +1,20 @@
 import SwiftUI
 import UIKit
 
-// MARK: - Preloaded thumbnail cache (load once, not every frame)
+// MARK: - Preloaded thumbnail cache
 
 private let thumbnailCache: [String: UIImage] = {
     var cache = [String: UIImage]()
-    let items: [(String, String)] = [
-        ("earth_daymap", "jpg"),
-        ("earth_nightmap", "jpg"),
-        ("earth_normal_map", "tif"),
-        ("earth_specular_map", "tif"),
+    for (name, ext) in [
+        ("earth_daymap", "jpg"), ("earth_nightmap", "jpg"),
+        ("earth_normal_map", "tif"), ("earth_specular_map", "tif"),
         ("earth_clouds", "jpg"),
-    ]
-    for (name, ext) in items {
+    ] {
         if let url = Bundle.main.url(forResource: name, withExtension: ext, subdirectory: "Textures")
             ?? Bundle.main.url(forResource: name, withExtension: ext),
            let data = try? Data(contentsOf: url),
-           let image = UIImage(data: data) {
-            cache[name] = image
+           let img = UIImage(data: data) {
+            cache[name] = img
         }
     }
     return cache
@@ -40,12 +37,17 @@ private let allTextures: [TextureItem] = [
     TextureItem(id: 5, name: "Clouds", imageName: "earth_clouds", icon: "cloud.fill"),
 ]
 
+// MARK: - Liquid spring
+
+private let liquidSpring = Animation.spring(response: 0.5, dampingFraction: 0.7, blendDuration: 0.1)
+
 // MARK: - Content View
 
 struct ContentView: View {
 
     @State private var activeTextureIndex = 0
     @State private var zoom: Float = 3.0
+    @Namespace private var selectionNamespace
 
     private let minZoom: Float = 1.5
     private let maxZoom: Float = 8.0
@@ -57,87 +59,158 @@ struct ContentView: View {
             MetalGlobeView(activeTextureIndex: $activeTextureIndex, zoom: $zoom)
                 .ignoresSafeArea()
 
-            // Zoom controls — left
+            // Zoom — left
             zoomControls
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                 .padding(.leading, 16)
 
-            // Texture selector — right
+            // Textures — right
             textureSelector
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
-                .padding(.trailing, 16)
+                .padding(.trailing, 14)
 
-            // Active label — bottom
-            activeLabel
+            // Tag — bottom
+            activeTag
                 .frame(maxHeight: .infinity, alignment: .bottom)
-                .padding(.bottom, 40)
+                .padding(.bottom, 44)
         }
-        .animation(.snappy(duration: 0.3), value: activeTextureIndex)
     }
 
-    // MARK: - Zoom Controls
+    // MARK: - Zoom
 
     private var zoomControls: some View {
         VStack(spacing: 10) {
             Button { zoom = max(zoom - 0.5, minZoom) } label: {
                 Image(systemName: "plus")
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(.white)
-                    .frame(width: 36, height: 36)
-                    .background(Color.white.opacity(0.1), in: Circle())
+                    .frame(width: 34, height: 34)
+                    .background(Color.white.opacity(0.08), in: Circle())
             }
 
             ZoomSlider(value: $zoom, range: minZoom...maxZoom)
-                .frame(width: 36, height: 180)
+                .frame(width: 34, height: 170)
 
             Button { zoom = min(zoom + 0.5, maxZoom) } label: {
                 Image(systemName: "minus")
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(.white)
-                    .frame(width: 36, height: 36)
-                    .background(Color.white.opacity(0.1), in: Circle())
+                    .frame(width: 34, height: 34)
+                    .background(Color.white.opacity(0.08), in: Circle())
             }
         }
     }
 
-    // MARK: - Texture Selector
+    // MARK: - Texture Selector with Liquid Selection Indicator
 
     private var textureSelector: some View {
-        VStack(spacing: 10) {
-            TextureThumbnail(
-                isSelected: activeTextureIndex == 0,
-                label: "All"
-            ) {
-                activeTextureIndex = 0
-            }
+        VStack(spacing: 8) {
+            // "All" button
+            thumbnailButton(id: 0, label: "All", image: nil, icon: "globe")
 
             ForEach(allTextures) { item in
-                TextureThumbnail(
+                thumbnailButton(
+                    id: item.id,
+                    label: item.name,
                     image: thumbnailCache[item.imageName],
-                    isSelected: activeTextureIndex == item.id,
-                    label: item.name
-                ) {
-                    activeTextureIndex = item.id
-                }
+                    icon: item.icon
+                )
             }
         }
     }
 
-    // MARK: - Active Label
+    private func thumbnailButton(id: Int, label: String, image: UIImage?, icon: String) -> some View {
+        let selected = activeTextureIndex == id
+        return Button {
+            withAnimation(liquidSpring) {
+                activeTextureIndex = id
+            }
+        } label: {
+            VStack(spacing: 3) {
+                ZStack {
+                    // Liquid selection background — morphs between items
+                    if selected {
+                        RoundedRectangle(cornerRadius: 11)
+                            .fill(.blue.opacity(0.2))
+                            .matchedGeometryEffect(id: "selection_bg", in: selectionNamespace)
+
+                        RoundedRectangle(cornerRadius: 11)
+                            .strokeBorder(Color.blue.opacity(0.7), lineWidth: 2)
+                            .matchedGeometryEffect(id: "selection_border", in: selectionNamespace)
+                    }
+
+                    // Thumbnail content
+                    if let image {
+                        Image(uiImage: image)
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                    } else {
+                        Image(systemName: icon)
+                            .font(.system(size: 20, weight: .medium))
+                            .foregroundStyle(.white.opacity(selected ? 1.0 : 0.6))
+                    }
+                }
+                .frame(width: 50, height: 50)
+                .clipShape(RoundedRectangle(cornerRadius: 11))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 11)
+                        .strokeBorder(
+                            Color.white.opacity(selected ? 0 : 0.12),
+                            lineWidth: 0.5
+                        )
+                )
+                .shadow(color: selected ? .blue.opacity(0.3) : .clear, radius: 8, y: 2)
+                .scaleEffect(selected ? 1.06 : 1.0)
+
+                Text(label)
+                    .font(.system(size: 9, weight: selected ? .semibold : .regular))
+                    .foregroundStyle(.white.opacity(selected ? 1 : 0.45))
+            }
+        }
+        .buttonStyle(LiquidButtonStyle())
+    }
+
+    // MARK: - Active Tag (Fluid morph)
 
     @ViewBuilder
-    private var activeLabel: some View {
-        if activeTextureIndex > 0,
-           let active = allTextures.first(where: { $0.id == activeTextureIndex }) {
-            Text(active.name.uppercased())
-                .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                .foregroundStyle(.white.opacity(0.8))
-                .tracking(2)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 6)
-                .background(Color.white.opacity(0.08), in: Capsule())
-                .transition(.opacity.combined(with: .offset(y: 8)))
+    private var activeTag: some View {
+        let activeName = activeTextureIndex == 0
+            ? "All Layers"
+            : (allTextures.first { $0.id == activeTextureIndex }?.name ?? "")
+
+        HStack(spacing: 6) {
+            Circle()
+                .fill(.blue)
+                .frame(width: 6, height: 6)
+
+            Text(activeName.uppercased())
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.85))
+                .tracking(1.5)
+                .contentTransition(.numericText())
         }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 7)
+        .background(
+            Capsule()
+                .fill(Color.white.opacity(0.06))
+                .overlay(
+                    Capsule()
+                        .strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5)
+                )
+        )
+        .animation(liquidSpring, value: activeTextureIndex)
+    }
+}
+
+// MARK: - Liquid Button Style
+
+struct LiquidButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.88 : 1.0)
+            .opacity(configuration.isPressed ? 0.7 : 1.0)
+            .animation(.spring(response: 0.25, dampingFraction: 0.6), value: configuration.isPressed)
     }
 }
 
@@ -149,13 +222,13 @@ struct ZoomSlider: View {
 
     var body: some View {
         GeometryReader { geo in
-            let trackHeight = geo.size.height - 12
-            let fraction = CGFloat((value - range.lowerBound) / (range.upperBound - range.lowerBound))
-            let thumbY = fraction * trackHeight
+            let trackH = geo.size.height - 10
+            let frac = CGFloat((value - range.lowerBound) / (range.upperBound - range.lowerBound))
+            let thumbY = frac * trackH
 
             ZStack(alignment: .top) {
                 Capsule()
-                    .fill(.white.opacity(0.12))
+                    .fill(.white.opacity(0.1))
                     .frame(width: 3)
                     .frame(maxHeight: .infinity)
 
@@ -169,70 +242,11 @@ struct ZoomSlider: View {
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { drag in
-                        let clamped = min(max(drag.location.y - 6, 0), trackHeight)
-                        value = range.lowerBound + Float(clamped / trackHeight) * (range.upperBound - range.lowerBound)
+                        let clamped = min(max(drag.location.y - 5, 0), trackH)
+                        value = range.lowerBound + Float(clamped / trackH) * (range.upperBound - range.lowerBound)
                     }
             )
         }
-    }
-}
-
-// MARK: - Texture Thumbnail (GPU-friendly, no material blur)
-
-struct TextureThumbnail: View {
-    var image: UIImage? = nil
-    let isSelected: Bool
-    let label: String
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            VStack(spacing: 3) {
-                thumbnailImage
-                    .frame(width: 50, height: 50)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 10)
-                            .strokeBorder(
-                                isSelected ? Color.blue : Color.white.opacity(0.15),
-                                lineWidth: isSelected ? 2 : 0.5
-                            )
-                    )
-                    .shadow(color: isSelected ? .blue.opacity(0.35) : .clear, radius: 6)
-                    .scaleEffect(isSelected ? 1.08 : 1.0)
-
-                Text(label)
-                    .font(.system(size: 9, weight: isSelected ? .semibold : .regular))
-                    .foregroundStyle(.white.opacity(isSelected ? 1.0 : 0.5))
-            }
-        }
-        .buttonStyle(ScaleButtonStyle())
-    }
-
-    @ViewBuilder
-    private var thumbnailImage: some View {
-        if let image {
-            Image(uiImage: image)
-                .resizable()
-                .aspectRatio(contentMode: .fill)
-        } else {
-            ZStack {
-                Color.white.opacity(0.06)
-                Image(systemName: "globe")
-                    .font(.system(size: 20, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.8))
-            }
-        }
-    }
-}
-
-// MARK: - Performant Scale Button Style
-
-struct ScaleButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .scaleEffect(configuration.isPressed ? 0.9 : 1.0)
-            .animation(.snappy(duration: 0.15), value: configuration.isPressed)
     }
 }
 
