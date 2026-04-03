@@ -81,7 +81,7 @@ final class EarthRenderer: NSObject, MTKViewDelegate {
     }
     private var previousTextureIndex: Int = 0
     private var transitionProgress: Float = 1.0 // 0=start, 1=complete
-    private let transitionSpeed: Float = 0.06
+    private let transitionSpeed: Float = 0.1
 
     // Globe parameters
     private let planetRadius: Float = 1.0
