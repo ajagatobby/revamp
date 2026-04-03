@@ -72,7 +72,7 @@ final class EarthRenderer: NSObject, MTKViewDelegate {
     // Globe parameters
     private let planetRadius: Float = 1.0
     private let atmosphereRadius: Float = 1.04
-    private let outerGlowRadius: Float = 1.12 // Soft ambient glow extends further
+    private let outerGlowRadius: Float = 1.08 // Tight blue rim glow
 
     // Vertex descriptor for MDLMesh
     private var vertexDescriptor: MTLVertexDescriptor!

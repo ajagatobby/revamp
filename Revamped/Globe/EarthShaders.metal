@@ -548,32 +548,36 @@ fragment float4 atmosphereFragmentShader(
 
     float3 atmosphere = inScatteredLight * sunIntensity;
 
-    // --- Fresnel Edge Glow ---
-    // As incidence angle -> 90°, atmosphere appears thicker and brighter
-    // Multiply by dayMask so it naturally fades on the night side
+    // --- Fresnel Edge Glow (Bright Blue Rim) ---
+    // Visible ALL around the planet (day and night side)
+    // Tight, concentrated glow right at the limb
     float3 surfPoint = camPos + rayDir * rayStart;
     float3 surfNorm = normalize(surfPoint);
     float fresnelAngle = 1.0 - abs(dot(surfNorm, -rayDir));
-    float fresnelPower = pow(fresnelAngle, 4.0);
 
-    // Wavelength-dependent Fresnel (blue dominant, matching Rayleigh)
-    float3 fresnelColor = float3(0.25, 0.45, 1.0) * fresnelPower * 0.6;
-    atmosphere += fresnelColor * dayMask;
+    // Tight electric blue rim — high power for sharp falloff, visible everywhere
+    float rimIntensity = pow(fresnelAngle, 3.0);
+    float3 rimColor = float3(0.15, 0.4, 1.0); // Deep electric/cobalt blue
 
-    // Subtle rim glow on the night side (Earth's limb from scattered starlight)
-    float nightRim = pow(fresnelAngle, 6.0) * (1.0 - dayMask) * 0.08;
-    atmosphere += float3(0.1, 0.15, 0.3) * nightRim;
+    // Day side: brighter rim + physical scattering
+    // Night side: still visible rim but slightly dimmer
+    float rimDayBoost = mix(0.7, 1.0, dayMask); // Night=0.7x, Day=1.0x
+    atmosphere += rimColor * rimIntensity * rimDayBoost * 1.2;
+
+    // Extra-bright thin edge line (very high power Fresnel for the sharp limb)
+    float thinEdge = pow(fresnelAngle, 8.0);
+    atmosphere += float3(0.3, 0.6, 1.0) * thinEdge * 0.8;
 
     // --- Tone Mapping (ACES approximation) ---
     float3 x = atmosphere;
     atmosphere = (x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14);
     atmosphere = saturate(atmosphere);
 
-    // Alpha from perceived luminance of scattered light
-    float alpha = saturate(dot(atmosphere, float3(0.299, 0.587, 0.114)) * 2.5);
+    // Alpha: strong at the rim for the visible glow ring
+    float alpha = saturate(dot(atmosphere, float3(0.299, 0.587, 0.114)) * 3.0 + rimIntensity * 0.6);
 
-    // Reduce alpha over planet surface (surface shader handles its own contribution)
-    alpha = mix(alpha, alpha * 0.55, hitsPlanet);
+    // Reduce alpha over planet surface
+    alpha = mix(alpha, alpha * 0.5, hitsPlanet);
 
     return float4(atmosphere, alpha);
 }
@@ -600,13 +604,11 @@ fragment float4 previewFragmentShader(
     return float4(texColor.rgb * lighting, 1.0);
 }
 
-// MARK: - Outer Glow Fragment Shader (Ambient Fresnel Halo)
+// MARK: - Outer Glow Fragment Shader (Electric Blue Rim Halo)
 //
-// This implements the shader-based approach: a soft, ambient atmospheric glow
-// that extends beyond the physical atmosphere sphere. It uses:
-// 1. Base atmosphere color masked by sun incidence (day/night)
-// 2. Fresnel effect for edge-brightening that decreases transparency at grazing angles
-// Combined with additive blending, this creates the visible halo ring around Earth.
+// Creates the bright blue atmospheric rim glow visible all around the planet.
+// Matches the reference: tight, vivid cobalt blue rim hugging the limb,
+// visible on both day and night sides, with sharp falloff into space.
 
 fragment float4 outerGlowFragmentShader(
     AtmosphereVertexOut in [[stage_in]],
@@ -618,64 +620,59 @@ fragment float4 outerGlowFragmentShader(
     float3 fragWorldPos = in.worldPosition;
     float3 rayDir = normalize(fragWorldPos - camPos);
 
-    // --- Step 1: Base Atmosphere Color & Sunlight Mask ---
-    // Compute sun incidence at the closest surface point along this ray
+    // Don't draw over the planet surface
     float2 planetHit = raySphereIntersect(camPos, rayDir, float3(0.0), planetR);
+    float overPlanet = step(0.0, planetHit.x);
 
-    // Use the atmosphere entry point's normal for sun angle calculation
-    float3 closestNormal = normalize(fragWorldPos);
-
-    // cos(angle) between sun direction and surface normal
-    float sunCosAngle = dot(closestNormal, sunDir);
-
-    // Day/night mask: smooth transition with exponential falloff
-    // Glow visible on day side, fading across the terminator
-    float mixAmount = saturate(sunCosAngle * 1.8 + 0.4);
-    mixAmount = pow(mixAmount, 1.2);
-
-    // Base atmosphere color: blue tint weighted by Rayleigh wavelength dependence
-    // (shorter wavelengths scatter more: 1/lambda^4)
-    float3 atmosphereColor = float3(0.3, 0.55, 1.0);
-
-    // --- Step 2: Fresnel Effect (Edge Glow) ---
-    // Calculate angle between camera-to-surface vector and surface normal
-    float3 viewDir = -rayDir;
-    float NdotV = abs(dot(closestNormal, viewDir));
-
-    // As angle approaches 90° (edges), NdotV -> 0, fresnel -> 1
-    // This makes the atmosphere LESS transparent at the edges = thicker glowing ring
-    float fresnel = 1.0 - NdotV;
-
-    // Distance from planet center to determine falloff
+    // Fragment's position relative to planet center
+    float3 fragNormal = normalize(fragWorldPos);
     float distFromCenter = length(fragWorldPos);
-    float normalizedDist = (distFromCenter - planetR) / (uniforms.atmosphereRadius * 1.1 - planetR);
 
-    // Smooth radial falloff: glow fades as we get further from the planet
+    // --- Radial distance falloff ---
+    // Glow is tightest near the planet surface and drops off sharply
+    float glowOuterEdge = planetR * 1.08; // Glow extends ~8% beyond surface
+    float normalizedDist = (distFromCenter - planetR) / (glowOuterEdge - planetR);
     float radialFalloff = saturate(1.0 - normalizedDist);
-    radialFalloff = radialFalloff * radialFalloff; // Quadratic falloff
+    radialFalloff = pow(radialFalloff, 1.5); // Sharp falloff
 
-    // Combine Fresnel with radial falloff for the final glow intensity
-    // High power Fresnel = thin, bright ring at the edge
-    float glowIntensity = pow(fresnel, 2.5) * radialFalloff;
+    // --- Fresnel (limb brightening) ---
+    // Glow is brightest at the very edge of the planet silhouette
+    float3 viewDir = -rayDir;
+    float NdotV = abs(dot(fragNormal, viewDir));
+    float fresnel = 1.0 - NdotV;
+    float rimGlow = pow(fresnel, 2.0);
 
-    // Mask the glow by day/night (the algorithm's mixAmount step)
-    float3 glowColor = atmosphereColor * glowIntensity * mixAmount * 0.6;
+    // --- Day/night modulation (subtle — glow is visible everywhere) ---
+    float sunCosAngle = dot(fragNormal, sunDir);
+    // Night side gets ~60% intensity, day side gets 100%
+    float dayBoost = mix(0.6, 1.0, saturate(sunCosAngle * 1.5 + 0.5));
 
-    // --- Mie forward scattering halo around sun ---
-    // Add a subtle warm halo where the sun is directly behind the atmosphere
+    // --- Electric blue rim color ---
+    // Deep cobalt blue matching the reference image
+    float3 rimColor = float3(0.1, 0.35, 1.0);
+
+    // Primary glow: tight rim around the entire planet
+    float glowStrength = rimGlow * radialFalloff * dayBoost;
+    float3 glowColor = rimColor * glowStrength * 1.4;
+
+    // Brighter thin edge (very concentrated at the limb)
+    float thinEdge = pow(fresnel, 5.0) * radialFalloff;
+    glowColor += float3(0.2, 0.5, 1.0) * thinEdge * dayBoost * 0.8;
+
+    // Softer wide glow (subtle diffuse spread beyond the sharp rim)
+    float wideGlow = pow(fresnel, 1.2) * pow(radialFalloff, 2.5);
+    glowColor += float3(0.05, 0.15, 0.5) * wideGlow * dayBoost * 0.4;
+
+    // --- Mie sun halo (warm tint near sun direction) ---
     float sunAlignment = max(0.0, dot(rayDir, sunDir));
-    float mieGlow = pow(sunAlignment, 12.0) * mixAmount * radialFalloff;
-    glowColor += float3(1.0, 0.85, 0.6) * mieGlow * 0.25;
+    float mieHalo = pow(sunAlignment, 16.0) * radialFalloff;
+    glowColor += float3(0.4, 0.5, 0.8) * mieHalo * 0.3;
 
-    // --- Night side subtle rim ---
-    float nightFresnel = pow(fresnel, 4.0) * (1.0 - mixAmount) * radialFalloff;
-    glowColor += float3(0.05, 0.08, 0.18) * nightFresnel;
+    // Alpha: visible all around, strongest at the rim
+    float alpha = saturate(glowStrength * 1.5 + thinEdge * 1.0 + wideGlow * 0.3);
 
-    // Alpha: Fresnel-driven transparency decrease at edges, masked by day/night
-    float alpha = saturate(glowIntensity * mixAmount * 1.2 + mieGlow * 0.5 + nightFresnel * 0.3);
-
-    // Don't draw glow over the planet itself
-    alpha *= 1.0 - step(0.0, planetHit.x);
+    // Hide over planet surface
+    alpha *= (1.0 - overPlanet);
 
     return float4(glowColor, alpha);
 }
