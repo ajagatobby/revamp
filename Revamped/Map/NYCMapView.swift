@@ -9,28 +9,69 @@ struct NYCMapView: View {
     private let timesSquare = CLLocationCoordinate2D(latitude: 40.7580, longitude: -73.9855)
 
     @State private var position: MapCameraPosition = .camera(MapCamera(
-        centerCoordinate: CLLocationCoordinate2D(latitude: 40.8012, longitude: -73.9440),
-        distance: 300,
-        heading: 180,
-        pitch: 70
+        centerCoordinate: CLLocationCoordinate2D(latitude: 40.7580, longitude: -73.9855),
+        distance: 2000,
+        heading: 0,
+        pitch: 45
     ))
 
-    @State private var journeyPhase = 0
+    @State private var mapStyle: MapStyle = .standard(elevation: .realistic)
+    @State private var hasStartedJourney = false
+    @State private var isVisible = false
 
     var body: some View {
         Map(position: $position, interactionModes: []) {
         }
-        .mapStyle(.imagery(elevation: .realistic))
+        .mapStyle(mapStyle)
         .mapControlVisibility(.hidden)
         .onAppear {
+            isVisible = true
+            // Pre-position at Times Square with standard tiles (fast load)
+            // Then upgrade to satellite imagery after a moment
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                mapStyle = .imagery(elevation: .realistic)
+            }
+        }
+        .onDisappear {
+            isVisible = false
+        }
+        .onChange(of: isVisible) { _, visible in
+            if visible && !hasStartedJourney {
+                // Wait for satellite tiles to start loading, then begin
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                    if !hasStartedJourney {
+                        hasStartedJourney = true
+                        startJourney()
+                    }
+                }
+            }
+        }
+    }
+
+    func resetAndStart() {
+        hasStartedJourney = false
+        position = .camera(MapCamera(
+            centerCoordinate: cozyHotel,
+            distance: 300,
+            heading: 180,
+            pitch: 70
+        ))
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            hasStartedJourney = true
             startJourney()
         }
     }
 
     private func startJourney() {
-        journeyPhase = 0
+        // Start at Cozy Hotel
+        position = .camera(MapCamera(
+            centerCoordinate: cozyHotel,
+            distance: 400,
+            heading: 180,
+            pitch: 65
+        ))
 
-        // Phase 1: Show Cozy Hotel up close, slight orbit (2s)
+        // Phase 1: Orbit at Cozy Hotel (2s)
         withAnimation(.easeInOut(duration: 2.0)) {
             position = .camera(MapCamera(
                 centerCoordinate: cozyHotel,
@@ -40,7 +81,7 @@ struct NYCMapView: View {
             ))
         }
 
-        // Phase 2: Pull up and start heading south toward Times Square (4s)
+        // Phase 2: Pull up heading south (4s)
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
             let midpoint = CLLocationCoordinate2D(
                 latitude: (cozyHotel.latitude + timesSquare.latitude) / 2,
@@ -68,7 +109,7 @@ struct NYCMapView: View {
             }
         }
 
-        // Phase 4: Slow orbit around Times Square (continuous)
+        // Phase 4: Orbit Times Square
         DispatchQueue.main.asyncAfter(deadline: .now() + 11.5) {
             startOrbit(heading: 135)
         }
@@ -83,7 +124,6 @@ struct NYCMapView: View {
                 pitch: 70
             ))
         }
-
         DispatchQueue.main.asyncAfter(deadline: .now() + 10.0) {
             let next = heading + 90
             startOrbit(heading: next >= 360 ? next - 360 : next)
