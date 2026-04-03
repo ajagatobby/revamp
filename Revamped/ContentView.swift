@@ -3,8 +3,10 @@ import UIKit
 
 // MARK: - Preloaded thumbnail cache
 
+// Thumbnails loaded at 128x64 (not full 4K!) for minimal memory + fast load
 private let thumbnailCache: [String: UIImage] = {
     var cache = [String: UIImage]()
+    let thumbSize = CGSize(width: 128, height: 64)
     for (name, ext) in [
         ("earth_daymap", "jpg"), ("earth_nightmap", "jpg"),
         ("earth_normal_map", "tif"), ("earth_specular_map", "tif"),
@@ -13,8 +15,13 @@ private let thumbnailCache: [String: UIImage] = {
         if let url = Bundle.main.url(forResource: name, withExtension: ext, subdirectory: "Textures")
             ?? Bundle.main.url(forResource: name, withExtension: ext),
            let data = try? Data(contentsOf: url),
-           let img = UIImage(data: data) {
-            cache[name] = img
+           let fullImg = UIImage(data: data) {
+            // Downscale to thumbnail size
+            let renderer = UIGraphicsImageRenderer(size: thumbSize)
+            let thumb = renderer.image { _ in
+                fullImg.draw(in: CGRect(origin: .zero, size: thumbSize))
+            }
+            cache[name] = thumb
         }
     }
     return cache

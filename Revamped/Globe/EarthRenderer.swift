@@ -28,6 +28,9 @@ final class EarthRenderer: NSObject, MTKViewDelegate {
     private let commandQueue: MTLCommandQueue
     private let library: MTLLibrary
 
+    // Triple buffering semaphore (prevents CPU-GPU stalls)
+    private let inflightSemaphore = DispatchSemaphore(value: 3)
+
     // Pipelines
     private var earthPipelineState: MTLRenderPipelineState!
     private var atmospherePipelineState: MTLRenderPipelineState!
@@ -182,11 +185,11 @@ final class EarthRenderer: NSObject, MTKViewDelegate {
             MDLVertexBufferLayout(stride: 56)
         ])
 
-        // Earth sphere (high resolution for HD)
+        // Earth sphere (96×64 = good quality, 50% fewer verts than 128×96)
         let earthMDL = MDLMesh.newEllipsoid(
             withRadii: SIMD3<Float>(repeating: planetRadius),
-            radialSegments: 128,
-            verticalSegments: 96,
+            radialSegments: 96,
+            verticalSegments: 64,
             geometryType: .triangles,
             inwardNormals: false,
             hemisphere: false,
@@ -473,9 +476,19 @@ final class EarthRenderer: NSObject, MTKViewDelegate {
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
 
     func draw(in view: MTKView) {
+        // Triple buffering: wait if GPU is 3+ frames behind
+        inflightSemaphore.wait()
+
         guard let drawable = view.currentDrawable,
               let rpd = view.currentRenderPassDescriptor,
-              let commandBuffer = commandQueue.makeCommandBuffer() else { return }
+              let commandBuffer = commandQueue.makeCommandBuffer() else {
+            inflightSemaphore.signal()
+            return
+        }
+
+        commandBuffer.addCompletedHandler { [weak self] _ in
+            self?.inflightSemaphore.signal()
+        }
 
         let time = Float(CACurrentMediaTime() - startTime)
         let aspect = Float(view.drawableSize.width / view.drawableSize.height)
