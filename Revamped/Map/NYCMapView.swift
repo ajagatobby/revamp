@@ -27,11 +27,6 @@ struct NYCMapView: UIViewRepresentable {
         mapView.showsUserLocation = false
         mapView.delegate = context.coordinator
 
-        // Phase 1: Attach cached tile overlay for faster re-loads
-        let tileOverlay = CachedTileOverlay()
-        tileOverlay.canReplaceMapContent = false // Supplement, don't replace
-        mapView.addOverlay(tileOverlay, level: .aboveLabels)
-
         // Initial camera: Times Square overview (loads tiles while hidden behind globe)
         let initialCamera = MKMapCamera(
             lookingAtCenter: Self.timesSquare,
@@ -54,14 +49,6 @@ struct NYCMapView: UIViewRepresentable {
     class Coordinator: NSObject, MKMapViewDelegate {
         weak var mapView: MKMapView?
         private var hasStartedJourney = false
-
-        // Phase 1: Tile overlay renderer
-        func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
-            if let tileOverlay = overlay as? CachedTileOverlay {
-                return MKTileOverlayRenderer(tileOverlay: tileOverlay)
-            }
-            return MKOverlayRenderer(overlay: overlay)
-        }
 
         func scheduleJourney() {
             guard !hasStartedJourney else { return }
