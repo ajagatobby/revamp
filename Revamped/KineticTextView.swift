@@ -53,9 +53,9 @@ struct KineticTextView: View {
     }
 
     private func lineSize(for text: String) -> CGFloat {
-        if text.count <= 4 { return 80 }
-        if text.count <= 7 { return 64 }
-        return 48
+        if text.count <= 4 { return 120 }
+        if text.count <= 7 { return 90 }
+        return 64
     }
 
     private func showPhrase(_ index: Int) {
