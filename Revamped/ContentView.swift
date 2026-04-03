@@ -121,6 +121,10 @@ struct ContentView: View {
                 .ignoresSafeArea()
                 .allowsHitTesting(false)
                 .transition(.opacity)
+
+                // --- Kinetic Typography ---
+                KineticTextView()
+                    .allowsHitTesting(false)
             }
 
             // --- Globe layer (always mounted, fades out — no blur, no destroy) ---
