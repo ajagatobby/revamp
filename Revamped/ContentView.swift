@@ -141,6 +141,9 @@ struct ContentView: View {
             }
         }
         .animation(.spring(response: 0.5, dampingFraction: 0.85), value: isInMap)
+        .onAppear {
+            startAutoSequence()
+        }
         .onChange(of: zoom) { _, newZoom in
             // Auto-transition to map when zoom hits threshold
             if newZoom <= transitionThreshold && transitionPhase == .globe && !hasAutoTriggered {
@@ -162,6 +165,7 @@ struct ContentView: View {
     }
 
     private func triggerTransitionToGlobe() {
+        hasAutoTriggered = false
         withAnimation(.easeIn(duration: 0.4)) {
             transitionPhase = .zoomingOut
         }
@@ -170,6 +174,16 @@ struct ContentView: View {
                 transitionPhase = .globe
                 zoom = 2.0
             }
+        }
+    }
+
+    private func startAutoSequence() {
+        // Start far away, then zoom in over 3.5 seconds
+        // The renderer's smooth interpolation (0.08/frame) animates the camera
+        zoom = 5.0
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            // Set the target zoom — the renderer lerps toward it smoothly
+            zoom = 0.6
         }
     }
 

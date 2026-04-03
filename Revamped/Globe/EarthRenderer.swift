@@ -64,11 +64,8 @@ final class EarthRenderer: NSObject, MTKViewDelegate {
     private var animatedZoom: Float = 5.0 // Current animated zoom value
     private var startTime: CFTimeInterval = 0
 
-    // Intro animation: start far away (small globe), zoom in
-    private let introStartZoom: Float = 5.0
-    private let introEndZoom: Float = 0.6  // Zoom all the way in to trigger map transition
-    private let introDuration: Float = 4.0 // seconds
-    private var introComplete = false
+    // No intro animation — SwiftUI drives the zoom sequence
+    private var introComplete = true
 
     // Zoom animation smoothing (0 = instant, 1 = never reaches target)
     private let zoomSmoothFactor: Float = 0.08
@@ -493,20 +490,8 @@ final class EarthRenderer: NSObject, MTKViewDelegate {
         let time = Float(CACurrentMediaTime() - startTime)
         let aspect = Float(view.drawableSize.width / view.drawableSize.height)
 
-        // Intro zoom animation (ease-out cubic for first 2.5s)
-        if time < introDuration {
-            let t = time / introDuration
-            let eased = 1.0 - pow(1.0 - t, 3.0)
-            animatedZoom = introStartZoom + (introEndZoom - introStartZoom) * eased
-        } else {
-            if !introComplete {
-                introComplete = true
-                zoom = introEndZoom
-                animatedZoom = introEndZoom
-            }
-            // Smooth interpolation: animatedZoom chases zoom target
-            animatedZoom += (zoom - animatedZoom) * zoomSmoothFactor
-        }
+        // Smooth interpolation: animatedZoom chases zoom target
+        animatedZoom += (zoom - animatedZoom) * zoomSmoothFactor
 
         // Camera position
         let cameraPos = SIMD3<Float>(0, 0, animatedZoom)
