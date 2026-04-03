@@ -557,50 +557,48 @@ final class EarthRenderer: NSObject, MTKViewDelegate {
             )
         }
 
-        // Draw atmosphere only in full render mode
-        if !isPreviewMode {
-            renderEncoder.setRenderPipelineState(atmospherePipelineState)
-            renderEncoder.setDepthStencilState(atmosphereDepthState)
-            renderEncoder.setCullMode(.front)
+        // 2. Draw Atmosphere (always — visible in all modes)
+        renderEncoder.setRenderPipelineState(atmospherePipelineState)
+        renderEncoder.setDepthStencilState(atmosphereDepthState)
+        renderEncoder.setCullMode(.front)
 
-            renderEncoder.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
-            renderEncoder.setFragmentBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
-            renderEncoder.setFragmentTexture(transmittanceLUT, index: 0)
-            renderEncoder.setFragmentTexture(multiScatterLUT, index: 1)
+        renderEncoder.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
+        renderEncoder.setFragmentBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
+        renderEncoder.setFragmentTexture(transmittanceLUT, index: 0)
+        renderEncoder.setFragmentTexture(multiScatterLUT, index: 1)
 
-            for (i, vertexBuffer) in atmosphereMesh.vertexBuffers.enumerated() {
-                renderEncoder.setVertexBuffer(vertexBuffer.buffer, offset: vertexBuffer.offset, index: i)
-            }
-            for submesh in atmosphereMesh.submeshes {
-                renderEncoder.drawIndexedPrimitives(
-                    type: submesh.primitiveType,
-                    indexCount: submesh.indexCount,
-                    indexType: submesh.indexType,
-                    indexBuffer: submesh.indexBuffer.buffer,
-                    indexBufferOffset: submesh.indexBuffer.offset
-                )
-            }
+        for (i, vertexBuffer) in atmosphereMesh.vertexBuffers.enumerated() {
+            renderEncoder.setVertexBuffer(vertexBuffer.buffer, offset: vertexBuffer.offset, index: i)
+        }
+        for submesh in atmosphereMesh.submeshes {
+            renderEncoder.drawIndexedPrimitives(
+                type: submesh.primitiveType,
+                indexCount: submesh.indexCount,
+                indexType: submesh.indexType,
+                indexBuffer: submesh.indexBuffer.buffer,
+                indexBufferOffset: submesh.indexBuffer.offset
+            )
+        }
 
-            // 3. Draw Outer Glow (soft ambient Fresnel halo, additive blending)
-            renderEncoder.setRenderPipelineState(outerGlowPipelineState)
-            renderEncoder.setDepthStencilState(atmosphereDepthState)
-            renderEncoder.setCullMode(.front)
+        // 3. Draw Outer Glow (always — blue rim visible in all modes)
+        renderEncoder.setRenderPipelineState(outerGlowPipelineState)
+        renderEncoder.setDepthStencilState(atmosphereDepthState)
+        renderEncoder.setCullMode(.front)
 
-            renderEncoder.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
-            renderEncoder.setFragmentBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
+        renderEncoder.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
+        renderEncoder.setFragmentBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
 
-            for (i, vertexBuffer) in outerGlowMesh.vertexBuffers.enumerated() {
-                renderEncoder.setVertexBuffer(vertexBuffer.buffer, offset: vertexBuffer.offset, index: i)
-            }
-            for submesh in outerGlowMesh.submeshes {
-                renderEncoder.drawIndexedPrimitives(
-                    type: submesh.primitiveType,
-                    indexCount: submesh.indexCount,
-                    indexType: submesh.indexType,
-                    indexBuffer: submesh.indexBuffer.buffer,
-                    indexBufferOffset: submesh.indexBuffer.offset
-                )
-            }
+        for (i, vertexBuffer) in outerGlowMesh.vertexBuffers.enumerated() {
+            renderEncoder.setVertexBuffer(vertexBuffer.buffer, offset: vertexBuffer.offset, index: i)
+        }
+        for submesh in outerGlowMesh.submeshes {
+            renderEncoder.drawIndexedPrimitives(
+                type: submesh.primitiveType,
+                indexCount: submesh.indexCount,
+                indexType: submesh.indexType,
+                indexBuffer: submesh.indexBuffer.buffer,
+                indexBufferOffset: submesh.indexBuffer.offset
+            )
         }
 
         renderEncoder.endEncoding()
