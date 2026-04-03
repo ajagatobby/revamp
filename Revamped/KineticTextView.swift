@@ -3,29 +3,29 @@ import SwiftUI
 // MARK: - Phrases + entrance style per phrase
 
 private struct Phrase {
-    let lines: [String]
+    let words: [String]
     let style: EntryStyle
     let alignment: HorizontalAlignment
 }
 
 private enum EntryStyle {
-    case scaleUp       // Scale from huge + fade in
-    case slideLeft     // Slide from right
-    case slideRight    // Slide from left
-    case slideUp       // Slide from bottom
-    case dropDown      // Drop from above with bounce
-    case expand        // Scale from 0 + rotate
+    case scaleUp
+    case slideLeft
+    case slideRight
+    case slideUp
+    case dropDown
+    case expand
 }
 
 private let phrases: [Phrase] = [
-    Phrase(lines: ["Discover"], style: .scaleUp, alignment: .center),
-    Phrase(lines: ["the", "world"], style: .slideLeft, alignment: .trailing),
-    Phrase(lines: ["around", "you"], style: .slideRight, alignment: .leading),
-    Phrase(lines: ["explore", "every"], style: .dropDown, alignment: .center),
-    Phrase(lines: ["corner of", "the city"], style: .slideUp, alignment: .trailing),
-    Phrase(lines: ["with the app"], style: .expand, alignment: .center),
-    Phrase(lines: ["open"], style: .scaleUp, alignment: .leading),
-    Phrase(lines: ["Revamped"], style: .dropDown, alignment: .center),
+    Phrase(words: ["Discover"], style: .scaleUp, alignment: .center),
+    Phrase(words: ["the", "world"], style: .slideLeft, alignment: .trailing),
+    Phrase(words: ["around", "you"], style: .slideRight, alignment: .leading),
+    Phrase(words: ["explore", "every"], style: .dropDown, alignment: .center),
+    Phrase(words: ["corner", "of", "the", "city"], style: .slideUp, alignment: .trailing),
+    Phrase(words: ["with", "the", "app"], style: .expand, alignment: .center),
+    Phrase(words: ["open"], style: .scaleUp, alignment: .leading),
+    Phrase(words: ["Revamped"], style: .dropDown, alignment: .center),
 ]
 
 // MARK: - Kinetic Text View
@@ -33,21 +33,21 @@ private let phrases: [Phrase] = [
 struct KineticTextView: View {
 
     @State private var currentPhrase = 0
-    @State private var lineVisible: [Bool] = []
+    @State private var wordVisible: [Bool] = []
     @State private var isRunning = false
 
     var body: some View {
-        VStack(alignment: currentAlignment, spacing: -8) {
+        // Wrap words in lines using FlowLayout-style approach
+        WrappingHStack(alignment: currentAlignment) {
             if currentPhrase < phrases.count {
                 let phrase = phrases[currentPhrase]
-                ForEach(Array(lineVisible.enumerated()), id: \.offset) { index, visible in
-                    if index < phrase.lines.count {
-                        Text(phrase.lines[index])
+                ForEach(Array(wordVisible.enumerated()), id: \.offset) { index, visible in
+                    if index < phrase.words.count {
+                        Text(phrase.words[index])
                             .font(.custom("BricolageGrotesque72pt-ExtraBold",
-                                          size: lineSize(for: phrase.lines[index])))
+                                          size: wordSize(for: phrase.words[index])))
                             .foregroundStyle(.white)
                             .shadow(color: .black.opacity(0.5), radius: 10, y: 4)
-                            .multilineTextAlignment(textAlignment(for: phrase.alignment))
                             .modifier(EntryAnimationModifier(
                                 style: phrase.style,
                                 visible: visible,
@@ -57,7 +57,7 @@ struct KineticTextView: View {
                 }
             }
         }
-        .padding(.horizontal, 20)
+        .padding(.horizontal, 24)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear {
             guard !isRunning else { return }
@@ -71,16 +71,9 @@ struct KineticTextView: View {
         return phrases[currentPhrase].alignment
     }
 
-    private func textAlignment(for alignment: HorizontalAlignment) -> TextAlignment {
-        switch alignment {
-        case .leading: return .leading
-        case .trailing: return .trailing
-        default: return .center
-        }
-    }
-
-    private func lineSize(for text: String) -> CGFloat {
-        if text.count <= 4 { return 120 }
+    private func wordSize(for text: String) -> CGFloat {
+        if text.count <= 3 { return 90 }
+        if text.count <= 5 { return 100 }
         if text.count <= 7 { return 90 }
         return 64
     }
@@ -88,17 +81,33 @@ struct KineticTextView: View {
     private func showPhrase(_ index: Int) {
         let idx = index % phrases.count
         currentPhrase = idx
-        let count = phrases[idx].lines.count
+        let count = phrases[idx].words.count
 
-        lineVisible = Array(repeating: false, count: count)
+        wordVisible = Array(repeating: false, count: count)
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-            lineVisible = Array(repeating: true, count: count)
+        // Stagger each word entrance
+        for i in 0..<count {
+            DispatchQueue.main.asyncAfter(deadline: .now() + Double(i) * 0.1) {
+                if i < wordVisible.count {
+                    withAnimation(.spring(response: 0.5, dampingFraction: 0.72)) {
+                        wordVisible[i] = true
+                    }
+                }
+            }
         }
 
-        let holdTime = 1.5 + Double(count) * 0.15
+        // Hold, then stagger exit each word
+        let holdTime = 1.6 + Double(count) * 0.1
         DispatchQueue.main.asyncAfter(deadline: .now() + holdTime) {
-            lineVisible = Array(repeating: false, count: count)
+            for i in 0..<wordVisible.count {
+                DispatchQueue.main.asyncAfter(deadline: .now() + Double(i) * 0.06) {
+                    if i < wordVisible.count {
+                        withAnimation(.easeIn(duration: 0.25)) {
+                            wordVisible[i] = false
+                        }
+                    }
+                }
+            }
 
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
                 showPhrase(index + 1)
@@ -107,7 +116,21 @@ struct KineticTextView: View {
     }
 }
 
-// MARK: - Entry Animation Modifier (different style per phrase)
+// MARK: - Wrapping HStack (words wrap to next line like text)
+
+private struct WrappingHStack<Content: View>: View {
+    let alignment: HorizontalAlignment
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        VStack(alignment: alignment, spacing: -8) {
+            content()
+                .fixedSize(horizontal: true, vertical: true)
+        }
+    }
+}
+
+// MARK: - Entry Animation Modifier
 
 private struct EntryAnimationModifier: ViewModifier {
     let style: EntryStyle
@@ -120,11 +143,6 @@ private struct EntryAnimationModifier: ViewModifier {
             .opacity(visible ? 1 : 0)
             .offset(x: offsetX, y: offsetY)
             .rotationEffect(.degrees(rotationValue))
-            .animation(
-                .spring(response: 0.55, dampingFraction: 0.7)
-                    .delay(Double(index) * 0.12),
-                value: visible
-            )
     }
 
     private var scaleValue: CGFloat {
@@ -132,25 +150,29 @@ private struct EntryAnimationModifier: ViewModifier {
         switch style {
         case .scaleUp: return 2.2
         case .expand: return 0.1
+        case .dropDown: return 1.3
         default: return 1
         }
     }
 
     private var offsetX: CGFloat {
         guard !visible else { return 0 }
+        let stagger = CGFloat(index) * 30
         switch style {
-        case .slideLeft: return 300
-        case .slideRight: return -300
+        case .slideLeft: return 250 + stagger
+        case .slideRight: return -250 - stagger
         default: return 0
         }
     }
 
     private var offsetY: CGFloat {
         guard !visible else { return 0 }
+        let stagger = CGFloat(index) * 20
         switch style {
-        case .slideUp: return 200
-        case .dropDown: return -200
-        case .scaleUp: return 30
+        case .slideUp: return 180 + stagger
+        case .dropDown: return -180 - stagger
+        case .scaleUp: return 30 + stagger
+        case .expand: return 20
         default: return 0
         }
     }
@@ -158,9 +180,10 @@ private struct EntryAnimationModifier: ViewModifier {
     private var rotationValue: Double {
         guard !visible else { return 0 }
         switch style {
-        case .expand: return -15
-        case .slideLeft: return 5
-        case .slideRight: return -5
+        case .expand: return Double(-12 + index * 6)
+        case .slideLeft: return Double(3 + index * 2)
+        case .slideRight: return Double(-3 - index * 2)
+        case .dropDown: return Double(index % 2 == 0 ? 4 : -4)
         default: return 0
         }
     }
@@ -168,7 +191,7 @@ private struct EntryAnimationModifier: ViewModifier {
 
 #Preview {
     ZStack {
-        Color.blue
+        Color.blue.ignoresSafeArea()
         KineticTextView()
     }
 }
