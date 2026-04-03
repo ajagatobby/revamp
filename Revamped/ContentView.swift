@@ -52,22 +52,64 @@ struct ContentView: View {
     private let minZoom: Float = 1.5
     private let maxZoom: Float = 8.0
 
+    // Globe-to-map transition zone
+    private let transitionStart: Float = 2.2 // Globe starts fading
+    private let transitionEnd: Float = 1.8   // Globe fully gone, map visible
+
+    // 0.0 = full globe, 1.0 = full map
+    private var transitionProgress: Double {
+        let clamped = min(max(zoom, transitionEnd), transitionStart)
+        return Double((transitionStart - clamped) / (transitionStart - transitionEnd))
+    }
+
+    private var globeOpacity: Double { 1.0 - transitionProgress }
+    private var mapOpacity: Double { transitionProgress }
+    private var isMapDominant: Bool { transitionProgress > 0.5 }
+
+    // Map camera: exponential distance mapping
+    private var mapCameraDistance: Double {
+        let t = Double((zoom - 1.5) / (2.2 - 1.5))
+        let clamped = min(max(t, 0), 1)
+        return 1200.0 * pow(50000.0 / 1200.0, clamped)
+    }
+
+    private var mapCameraPitch: Double {
+        let t = Double((zoom - 1.5) / (2.2 - 1.5))
+        return 60.0 * (1.0 - min(max(t, 0), 1))
+    }
+
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
 
+            // Metal globe layer
             MetalGlobeView(activeTextureIndex: $activeTextureIndex, zoom: $zoom)
                 .ignoresSafeArea()
+                .opacity(globeOpacity)
+                .allowsHitTesting(!isMapDominant)
+
+            // MapKit 3D NYC layer (loads slightly early for tile preloading)
+            if zoom < transitionStart + 0.2 {
+                NYCMapView(
+                    cameraDistance: mapCameraDistance,
+                    cameraPitch: mapCameraPitch
+                )
+                .ignoresSafeArea()
+                .opacity(mapOpacity)
+                .allowsHitTesting(isMapDominant)
+            }
 
             // Zoom — left
             zoomControls
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                 .padding(.leading, 16)
 
-            // Textures — right
+            // Textures — right (fade out in map mode)
             textureSelector
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
                 .padding(.trailing, 14)
+                .opacity(1.0 - transitionProgress)
+                .allowsHitTesting(!isMapDominant)
 
             // Tag — bottom
             activeTag

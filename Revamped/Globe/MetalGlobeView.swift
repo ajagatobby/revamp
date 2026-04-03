@@ -42,6 +42,8 @@ struct MetalGlobeView: UIViewRepresentable {
     func updateUIView(_ uiView: MTKView, context: Context) {
         context.coordinator.renderer?.activeTextureIndex = activeTextureIndex
         context.coordinator.renderer?.zoom = zoom
+        // Pause Metal rendering when fully in map mode to save GPU
+        uiView.isPaused = (zoom < 1.8)
     }
 
     // MARK: - Coordinator
