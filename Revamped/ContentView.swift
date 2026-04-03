@@ -55,33 +55,34 @@ struct ContentView: View {
                     .allowsHitTesting(false)
             }
 
-            // --- Globe layer ---
+            // --- Globe layer (pushed down so it sits below the title) ---
             MetalGlobeView(activeTextureIndex: $activeTextureIndex, zoom: $zoom)
                 .ignoresSafeArea()
-                .scaleEffect(transitionPhase == .zoomingIn ? 1.5 : 0.65)
+                .scaleEffect(transitionPhase == .zoomingIn ? 1.5 : 0.6)
+                .offset(y: transitionPhase == .welcome ? 120 : 0)
                 .opacity(transitionPhase == .welcome ? 1.0 : 0.0)
                 .allowsHitTesting(false)
 
             // --- Welcome overlay: Title + Button ---
             if transitionPhase == .welcome {
-                VStack(spacing: 0) {
-                    // Title
-                    VStack(spacing: -18) {
+                VStack {
+                    // Title at the top
+                    VStack(spacing: -16) {
                         Text("Planet")
-                            .font(.custom("BricolageGrotesque72pt-ExtraBold", size: 96))
+                            .font(.custom("BricolageGrotesque72pt-ExtraBold", size: 86))
                             .foregroundStyle(.white)
 
                         Text("Earth")
-                            .font(.custom("BricolageGrotesque72pt-ExtraBold", size: 96))
+                            .font(.custom("BricolageGrotesque72pt-ExtraBold", size: 86))
                             .foregroundStyle(Color(red: 0.35, green: 0.5, blue: 1.0))
                     }
                     .opacity(showTitle ? 1 : 0)
                     .offset(y: showTitle ? 0 : 20)
-                    .padding(.top, 80)
+                    .padding(.top, 70)
 
                     Spacer()
 
-                    // Get me in button
+                    // Get me in button at the bottom
                     VStack(spacing: 16) {
                         Button {
                             getIn()
@@ -89,7 +90,7 @@ struct ContentView: View {
                             Text("Get me in")
                                 .font(.custom("BricolageGrotesque24pt-SemiBold", size: 18))
                                 .foregroundStyle(.white)
-                                .frame(width: 200, height: 54)
+                                .frame(width: 220, height: 56)
                                 .background(
                                     Capsule()
                                         .fill(
@@ -114,7 +115,7 @@ struct ContentView: View {
                     }
                     .opacity(showButton ? 1 : 0)
                     .offset(y: showButton ? 0 : 30)
-                    .padding(.bottom, 60)
+                    .padding(.bottom, 50)
                 }
                 .transition(.opacity)
             }
