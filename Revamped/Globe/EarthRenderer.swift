@@ -68,7 +68,7 @@ final class EarthRenderer: NSObject, MTKViewDelegate {
     private var introComplete = true
 
     // Zoom animation smoothing (0 = instant, 1 = never reaches target)
-    private let zoomSmoothFactor: Float = 0.08
+    private let zoomSmoothFactor: Float = 0.12
 
     // Texture selection: 0=full render, 1=day, 2=night, 3=normal, 4=specular, 5=clouds
     var activeTextureIndex: Int = 0 {

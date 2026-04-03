@@ -31,7 +31,7 @@ struct ContentView: View {
                 }
             })
             .ignoresSafeArea()
-            .opacity(transitionPhase == .map || transitionPhase == .zoomingIn ? 1 : 0)
+            .opacity(transitionPhase == .map ? 1 : 0)
             .allowsHitTesting(isInMap)
 
             // --- Gradient overlay ---
@@ -55,10 +55,10 @@ struct ContentView: View {
                     .allowsHitTesting(false)
             }
 
-            // --- Globe layer (fullscreen, no clipping — zoom controls size) ---
+            // --- Globe layer (fullscreen, stays visible during zoomIn, fades in map phase) ---
             MetalGlobeView(activeTextureIndex: $activeTextureIndex, zoom: $zoom)
                 .ignoresSafeArea()
-                .opacity(transitionPhase == .welcome ? 1.0 : 0.0)
+                .opacity(transitionPhase == .map ? 0.0 : 1.0)
                 .allowsHitTesting(false)
 
             // --- Welcome overlay: Title + Button ---
@@ -133,28 +133,24 @@ struct ContentView: View {
     private func getIn() {
         SoundEngine.shared.playSwoosh()
 
-        // Fade out title + button
+        // 1. Fade out title + button
         withAnimation(.easeIn(duration: 0.3)) {
             showTitle = false
             showButton = false
         }
 
-        // Zoom globe in (renderer lerps smoothly from 4.2 → 0.5)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-            zoom = 0.5
-        }
+        // 2. Zoom globe in (renderer lerps 4.2 → 0.5)
+        zoom = 0.5
 
-        // Transition to map after globe zooms in
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+        // 3. After globe fills the screen (~2s for lerp to get close),
+        //    crossfade: globe fades out + map fades in simultaneously
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
             SoundEngine.shared.playWhoosh()
-            withAnimation(.easeInOut(duration: 1.2)) {
-                transitionPhase = .zoomingIn
+            withAnimation(.easeInOut(duration: 1.5)) {
+                transitionPhase = .map
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.1) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
                 SoundEngine.shared.playImpact()
-                withAnimation(.easeOut(duration: 0.4)) {
-                    transitionPhase = .map
-                }
             }
         }
     }
