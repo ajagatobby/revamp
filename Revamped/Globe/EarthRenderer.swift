@@ -71,7 +71,17 @@ final class EarthRenderer: NSObject, MTKViewDelegate {
     private let zoomSmoothFactor: Float = 0.08
 
     // Texture selection: 0=full render, 1=day, 2=night, 3=normal, 4=specular, 5=clouds
-    var activeTextureIndex: Int = 0
+    var activeTextureIndex: Int = 0 {
+        didSet {
+            if oldValue != activeTextureIndex {
+                previousTextureIndex = oldValue
+                transitionProgress = 0.0
+            }
+        }
+    }
+    private var previousTextureIndex: Int = 0
+    private var transitionProgress: Float = 1.0 // 0=start, 1=complete
+    private let transitionSpeed: Float = 0.06
 
     // Globe parameters
     private let planetRadius: Float = 1.0
@@ -516,10 +526,15 @@ final class EarthRenderer: NSObject, MTKViewDelegate {
         // -- Render Pass --
         guard let renderEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: rpd) else { return }
 
+        // Advance crossfade transition
+        transitionProgress = min(transitionProgress + transitionSpeed, 1.0)
+
         let isPreviewMode = activeTextureIndex > 0
+        let wasPreviewMode = previousTextureIndex > 0
+        let isTransitioning = transitionProgress < 1.0
 
         if isPreviewMode {
-            // Preview mode: show a single texture on the globe
+            // Preview mode: show a single texture on the globe with crossfade
             renderEncoder.setRenderPipelineState(previewPipelineState)
             renderEncoder.setDepthStencilState(depthStencilState)
             renderEncoder.setCullMode(.back)
@@ -528,9 +543,25 @@ final class EarthRenderer: NSObject, MTKViewDelegate {
             renderEncoder.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
             renderEncoder.setFragmentBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
 
-            // Bind selected texture to slot 0
-            let textures = [dayTexture!, nightTexture!, normalMapTexture!, specularMapTexture!, cloudTexture!]
-            renderEncoder.setFragmentTexture(textures[activeTextureIndex - 1], index: 0)
+            // Smooth ease-out transition
+            var mixValue = transitionProgress
+            mixValue = 1.0 - pow(1.0 - mixValue, 2.5) // ease-out
+            renderEncoder.setFragmentBytes(&mixValue, length: MemoryLayout<Float>.stride, index: 2)
+
+            // Current texture
+            let allTextures = [dayTexture!, nightTexture!, normalMapTexture!, specularMapTexture!, cloudTexture!]
+            renderEncoder.setFragmentTexture(allTextures[activeTextureIndex - 1], index: 0)
+
+            // Previous texture for crossfade
+            if isTransitioning && wasPreviewMode {
+                renderEncoder.setFragmentTexture(allTextures[previousTextureIndex - 1], index: 1)
+            } else if isTransitioning && !wasPreviewMode {
+                // Transitioning from full render to preview — use day texture as previous
+                renderEncoder.setFragmentTexture(dayTexture, index: 1)
+            } else {
+                // No transition — bind same texture to both slots
+                renderEncoder.setFragmentTexture(allTextures[activeTextureIndex - 1], index: 1)
+            }
 
         } else {
             // Full render mode

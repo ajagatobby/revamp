@@ -526,12 +526,14 @@ fragment float4 fresnelGlowFragmentShader(
     return float4(finalColor, alpha);
 }
 
-// MARK: - Preview Fragment Shader
+// MARK: - Preview Fragment Shader (with crossfade)
 
 fragment float4 previewFragmentShader(
     VertexOut in [[stage_in]],
     constant Uniforms &uniforms [[buffer(1)]],
-    texture2d<float> previewTexture [[texture(0)]]
+    constant float &transitionMix [[buffer(2)]],
+    texture2d<float> currentTexture [[texture(0)]],
+    texture2d<float> previousTexture [[texture(1)]]
 ) {
     constexpr sampler texSampler(mag_filter::linear, min_filter::linear,
                                   mip_filter::linear, address::repeat);
@@ -539,7 +541,13 @@ fragment float4 previewFragmentShader(
     float3 N = normalize(in.worldNormal);
     float3 L = normalize(uniforms.sunDirection);
     float2 uv = in.texCoord;
-    float4 texColor = previewTexture.sample(texSampler, uv);
+
+    float4 curColor = currentTexture.sample(texSampler, uv);
+    float4 prevColor = previousTexture.sample(texSampler, uv);
+
+    // Crossfade between previous and current texture
+    float4 texColor = mix(prevColor, curColor, transitionMix);
+
     float lighting = max(dot(N, L), 0.0) * 0.7 + 0.3;
 
     return float4(texColor.rgb * lighting, 1.0);
