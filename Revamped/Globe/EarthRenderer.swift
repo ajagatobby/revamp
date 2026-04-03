@@ -62,13 +62,15 @@ final class EarthRenderer: NSObject, MTKViewDelegate {
     var rotationY: Float = 0.0
     var zoom: Float = 5.0 // Target zoom (set by UI/gestures)
     private var animatedZoom: Float = 5.0 // Current animated zoom value
+    private var zoomVelocity: Float = 0.0 // Spring velocity
     private var startTime: CFTimeInterval = 0
 
     // No intro animation — SwiftUI drives the zoom sequence
     private var introComplete = true
 
-    // Zoom animation smoothing (0 = instant, 1 = never reaches target)
-    private let zoomSmoothFactor: Float = 0.12
+    // Damped spring parameters for zoom (critically damped — no oscillation)
+    private let springStiffness: Float = 25.0
+    private let springDamping: Float = 10.0
 
     // Texture selection: 0=full render, 1=day, 2=night, 3=normal, 4=specular, 5=clouds
     var activeTextureIndex: Int = 0 {
@@ -490,8 +492,13 @@ final class EarthRenderer: NSObject, MTKViewDelegate {
         let time = Float(CACurrentMediaTime() - startTime)
         let aspect = Float(view.drawableSize.width / view.drawableSize.height)
 
-        // Smooth interpolation: animatedZoom chases zoom target
-        animatedZoom += (zoom - animatedZoom) * zoomSmoothFactor
+        // Damped spring: accelerates into zoom, decelerates with crisp landing
+        let dt: Float = 1.0 / Float(max(view.preferredFramesPerSecond, 60))
+        let displacement = animatedZoom - zoom
+        let springForce = -springStiffness * displacement
+        let dampingForce = -springDamping * zoomVelocity
+        zoomVelocity += (springForce + dampingForce) * dt
+        animatedZoom += zoomVelocity * dt
 
         // Camera position
         let cameraPos = SIMD3<Float>(0, 0, animatedZoom)

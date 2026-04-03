@@ -25,11 +25,11 @@ struct ContentView: View {
             Color.black.ignoresSafeArea()
 
             // --- Globe layer (bottom — always visible until map fully covers it) ---
-            MetalGlobeView(activeTextureIndex: $activeTextureIndex, zoom: $zoom)
+            MetalGlobeView(activeTextureIndex: $activeTextureIndex, zoom: $zoom, paused: isInMap)
                 .ignoresSafeArea()
                 .allowsHitTesting(false)
 
-            // --- Map layer (fades in ON TOP of globe — creates morph effect) ---
+            // --- Map layer (crossfades in on top of globe as zoom settles) ---
             NYCMapView(onArrivedTimesSquare: {
                 SoundEngine.shared.playReveal()
                 withAnimation(.easeIn(duration: 1.5)) {
@@ -133,26 +133,26 @@ struct ContentView: View {
     private func getIn() {
         SoundEngine.shared.playSwoosh()
 
-        // 1. Fade out title + button immediately
+        // 1. Fade out title + button
         withAnimation(.easeIn(duration: 0.3)) {
             showTitle = false
             showButton = false
         }
 
-        // 2. Zoom globe in hard (4.2 → 0.5 = fills screen)
-        zoom = 0.5
+        // 2. Globe zooms OUT 10× via damped spring (4.2 → 42.0)
+        //    Camera pulls back — earth shrinks to a marble then disappears
+        zoom = 42.0
 
-        // 3. While globe is zooming in, start fading map in on top
-        //    Globe is still underneath — they blend together = morph
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+        // 3. As globe shrinks away, crossfade the map in
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
             SoundEngine.shared.playWhoosh()
-            withAnimation(.easeIn(duration: 2.0)) {
+            withAnimation(.easeInOut(duration: 1.6)) {
                 mapOpacity = 1.0
             }
         }
 
-        // 4. Once map is fully visible, mark as map phase
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+        // 4. Transition complete — map fully covers globe
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) {
             SoundEngine.shared.playImpact()
             transitionPhase = .map
         }

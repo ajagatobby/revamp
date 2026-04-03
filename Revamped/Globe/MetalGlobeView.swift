@@ -5,6 +5,7 @@ struct MetalGlobeView: UIViewRepresentable {
 
     @Binding var activeTextureIndex: Int
     @Binding var zoom: Float
+    var paused: Bool = false
 
     func makeCoordinator() -> Coordinator {
         Coordinator(zoomBinding: $zoom)
@@ -42,8 +43,7 @@ struct MetalGlobeView: UIViewRepresentable {
     func updateUIView(_ uiView: MTKView, context: Context) {
         context.coordinator.renderer?.activeTextureIndex = activeTextureIndex
         context.coordinator.renderer?.zoom = zoom
-        // Pause Metal rendering when fully in map mode to save GPU
-        uiView.isPaused = (zoom < 0.6)
+        uiView.isPaused = paused
     }
 
     // MARK: - Coordinator
@@ -85,7 +85,7 @@ struct MetalGlobeView: UIViewRepresentable {
 
             if gesture.state == .changed {
                 renderer.zoom /= Float(gesture.scale)
-                renderer.zoom = min(max(renderer.zoom, 0.5), 5.0)
+                renderer.zoom = min(max(renderer.zoom, 2.0), 8.0)
                 gesture.scale = 1.0
                 // Sync back to SwiftUI binding
                 zoomBinding.wrappedValue = renderer.zoom
