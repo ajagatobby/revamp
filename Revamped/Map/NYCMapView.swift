@@ -89,6 +89,10 @@ private struct LiveMapView: UIViewRepresentable {
             self.onTilesLoaded = onTilesLoaded
         }
 
+        deinit {
+            displayLink?.invalidate()
+        }
+
         // Detect when tiles finish loading
         func mapViewDidFinishRenderingMap(_ mapView: MKMapView, fullyRendered: Bool) {
             if fullyRendered && !hasNotifiedTilesLoaded {
@@ -147,18 +151,44 @@ private struct LiveMapView: UIViewRepresentable {
             }
         }
 
+        // MARK: - Smooth orbit via CADisplayLink (no animation handoff glitches)
+
+        private var displayLink: CADisplayLink?
+        private var orbitHeading: Double = 45
+        private let orbitSpeed: Double = 3.0 // degrees per second
+
         private func startOrbit(heading: Double) {
+            orbitHeading = heading
+            stopOrbit()
+
+            let link = CADisplayLink(target: self, selector: #selector(orbitTick))
+            link.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 120, preferred: 60)
+            link.add(to: .main, forMode: .common)
+            displayLink = link
+        }
+
+        private func stopOrbit() {
+            displayLink?.invalidate()
+            displayLink = nil
+        }
+
+        @objc private func orbitTick(_ link: CADisplayLink) {
             guard let mapView else { return }
-            // Linear for seamless continuous rotation — no stutter between segments
-            UIView.animate(withDuration: 12.0, delay: 0, options: [.curveLinear], animations: {
-                mapView.camera = MKMapCamera(
-                    lookingAtCenter: NYCMapView.timesSquare,
-                    fromDistance: 500, pitch: 70, heading: heading
-                )
-            }) { [weak self] _ in
-                let next = heading.truncatingRemainder(dividingBy: 360) + 90
-                self?.startOrbit(heading: next)
-            }
+
+            let dt = link.targetTimestamp - link.timestamp
+            orbitHeading += orbitSpeed * dt
+
+            // Keep in 0-360 range
+            if orbitHeading >= 360 { orbitHeading -= 360 }
+
+            // Direct camera property set — no animation, no handoff, perfectly smooth
+            let camera = MKMapCamera(
+                lookingAtCenter: NYCMapView.timesSquare,
+                fromDistance: 500,
+                pitch: 70,
+                heading: orbitHeading
+            )
+            mapView.camera = camera
         }
     }
 }
