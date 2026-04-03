@@ -97,6 +97,7 @@ struct ContentView: View {
 
             // --- Map layer (always mounted, fades in) ---
             NYCMapView(onArrivedTimesSquare: {
+                SoundEngine.shared.playReveal()
                 withAnimation(.easeIn(duration: 1.5)) {
                     showGradient = true
                 }
@@ -148,14 +149,14 @@ struct ContentView: View {
     }
 
     private func triggerTransitionToMap() {
-        // Wait 0.3s before starting transition
+        SoundEngine.shared.playSwoosh()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            // Globe fades out + scales up slowly while map fades in
+            SoundEngine.shared.playWhoosh()
             withAnimation(.easeInOut(duration: 1.2)) {
                 transitionPhase = .zoomingIn
             }
-            // Settle into map mode after crossfade completes
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.1) {
+                SoundEngine.shared.playImpact()
                 withAnimation(.easeOut(duration: 0.4)) {
                     transitionPhase = .map
                 }

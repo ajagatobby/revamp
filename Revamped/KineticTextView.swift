@@ -85,10 +85,11 @@ struct KineticTextView: View {
 
         wordVisible = Array(repeating: false, count: count)
 
-        // Stagger each word entrance
+        // Stagger each word entrance with pop sound
         for i in 0..<count {
             DispatchQueue.main.asyncAfter(deadline: .now() + Double(i) * 0.1) {
                 if i < wordVisible.count {
+                    SoundEngine.shared.playPop()
                     withAnimation(.spring(response: 0.5, dampingFraction: 0.72)) {
                         wordVisible[i] = true
                     }
