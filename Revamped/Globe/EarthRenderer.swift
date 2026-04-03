@@ -57,7 +57,8 @@ final class EarthRenderer: NSObject, MTKViewDelegate {
     // Camera & interaction
     var rotationX: Float = 0.2
     var rotationY: Float = 0.0
-    var zoom: Float = 3.0
+    var zoom: Float = 3.0 // Target zoom (set by UI/gestures)
+    private var animatedZoom: Float = 5.0 // Current animated zoom value
     private var startTime: CFTimeInterval = 0
 
     // Intro animation
@@ -65,6 +66,9 @@ final class EarthRenderer: NSObject, MTKViewDelegate {
     private let introEndZoom: Float = 3.0
     private let introDuration: Float = 2.5 // seconds
     private var introComplete = false
+
+    // Zoom animation smoothing (0 = instant, 1 = never reaches target)
+    private let zoomSmoothFactor: Float = 0.08
 
     // Texture selection: 0=full render, 1=day, 2=night, 3=normal, 4=specular, 5=clouds
     var activeTextureIndex: Int = 0
@@ -464,22 +468,23 @@ final class EarthRenderer: NSObject, MTKViewDelegate {
         let time = Float(CACurrentMediaTime() - startTime)
         let aspect = Float(view.drawableSize.width / view.drawableSize.height)
 
-        // Intro zoom animation (ease-out cubic: fast start, smooth deceleration)
-        let currentZoom: Float
+        // Intro zoom animation (ease-out cubic for first 2.5s)
         if time < introDuration {
             let t = time / introDuration
-            let eased = 1.0 - pow(1.0 - t, 3.0) // ease-out cubic
-            currentZoom = introStartZoom + (introEndZoom - introStartZoom) * eased
+            let eased = 1.0 - pow(1.0 - t, 3.0)
+            animatedZoom = introStartZoom + (introEndZoom - introStartZoom) * eased
         } else {
             if !introComplete {
                 introComplete = true
                 zoom = introEndZoom
+                animatedZoom = introEndZoom
             }
-            currentZoom = zoom
+            // Smooth interpolation: animatedZoom chases zoom target
+            animatedZoom += (zoom - animatedZoom) * zoomSmoothFactor
         }
 
         // Camera position
-        let cameraPos = SIMD3<Float>(0, 0, currentZoom)
+        let cameraPos = SIMD3<Float>(0, 0, animatedZoom)
 
         // Matrices
         let modelMatrix = makeRotationMatrix(angleX: rotationX, angleY: rotationY + time * 0.05)
