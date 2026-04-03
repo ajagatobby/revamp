@@ -52,7 +52,7 @@ private let liquidSpring = Animation.spring(response: 0.5, dampingFraction: 0.7,
 
 struct ContentView: View {
 
-    @State private var activeTextureIndex = 0
+    @State private var activeTextureIndex = 1 // Day texture
     @State private var zoom: Float = 5.0 // Start far away (small globe)
     @Namespace private var selectionNamespace
 
